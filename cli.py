@@ -227,6 +227,12 @@ def cmd_export(args):
         from output.yahoo_format import export_picks_csv
         output_path = args.output or os.path.join(DATA_DIR, "bracket_picks.csv")
         export_picks_csv(optimized, output_path)
+    elif args.format == "html":
+        from output.html_export import export_bracket_html
+        output_path = args.output or os.path.join(DATA_DIR, "bracket.html")
+        reach_probs = state.get("reach_probs", {})
+        pick_pcts = state.get("pick_pcts", {})
+        export_bracket_html(optimized, output_path, reach_probs, pick_pcts)
     else:
         print(f"Unknown format: {args.format}")
 
@@ -281,8 +287,8 @@ Workflow:
 
     # export
     p_export = subparsers.add_parser("export", help="Export the optimized bracket")
-    p_export.add_argument("--format", choices=["yahoo", "csv"], default="yahoo")
-    p_export.add_argument("--output", help="Output file path (for csv format)")
+    p_export.add_argument("--format", choices=["yahoo", "csv", "html"], default="yahoo")
+    p_export.add_argument("--output", help="Output file path (for csv/html formats)")
 
     args = parser.parse_args()
 
