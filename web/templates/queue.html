@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Seed Money — Processing{% endblock %}
+
+{% block content %}
+<div class="queue-page">
+    <div class="card queue-card">
+        <div id="status-icon" class="status-icon">
+            <div class="spinner"></div>
+        </div>
+
+        <h1 id="status-title">
+            {% if job.status == 'queued' %}
+                In Queue
+            {% elif job.status == 'running' %}
+                Optimizing...
+            {% elif job.status == 'failed' %}
+                Optimization Failed
+            {% endif %}
+        </h1>
+
+        <p id="status-message" class="status-message">
+            {% if job.status == 'queued' %}
+                Your bracket is in the queue. Hang tight!
+            {% elif job.status == 'running' %}
+                Crunching numbers &mdash; simulating thousands of tournaments...
+            {% elif job.status == 'failed' %}
+                Something went wrong. Please try again.
+            {% endif %}
+        </p>
+
+        <div id="queue-position" class="queue-position {% if job.status != 'queued' %}hidden{% endif %}">
+            Position: <span id="position-num">...</span>
+        </div>
+
+        <div id="error-details" class="error-details hidden">
+            <pre id="error-message"></pre>
+        </div>
+
+        <p class="job-id">Job ID: <code>{{ job_id }}</code></p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const jobId = "{{ job_id }}";
+    const pollInterval = 3000;
+
+    function pollStatus() {
+        fetch(`/api/jobs/${jobId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === "completed") {
+                    window.location.href = `/brackets/${jobId}`;
+                    return;
+                }
+
+                if (data.status === "running") {
+                    document.getElementById("status-title").textContent = "Optimizing...";
+                    document.getElementById("status-message").textContent =
+                        "Crunching numbers \u2014 simulating thousands of tournaments...";
+                    document.getElementById("queue-position").classList.add("hidden");
+                }
+
+                if (data.status === "queued" && data.position) {
+                    document.getElementById("position-num").textContent = data.position;
+                    document.getElementById("queue-position").classList.remove("hidden");
+                }
+
+                if (data.status === "failed") {
+                    document.getElementById("status-title").textContent = "Optimization Failed";
+                    document.getElementById("status-message").textContent =
+                        "Something went wrong. Please try again.";
+                    document.querySelector(".spinner").style.display = "none";
+                    if (data.error_message) {
+                        document.getElementById("error-details").classList.remove("hidden");
+                        document.getElementById("error-message").textContent = data.error_message;
+                    }
+                    return; // Stop polling
+                }
+
+                setTimeout(pollStatus, pollInterval);
+            })
+            .catch(() => setTimeout(pollStatus, pollInterval));
+    }
+
+    // Start polling
+    setTimeout(pollStatus, pollInterval);
+</script>
+{% endblock %}

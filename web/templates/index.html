@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Seed Money — Optimize Your Bracket{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <h1>Optimize Your Bracket</h1>
+    <p>Configure your pool settings, add biases, and let the algorithm find the best bracket for your pool.</p>
+</div>
+
+<form action="/optimize" method="POST" id="optimize-form" class="card">
+    <h2>Pool Configuration</h2>
+
+    <div class="form-grid">
+        <div class="form-group">
+            <label for="pool_size">Pool Size</label>
+            <input type="number" id="pool_size" name="pool_size" min="2" max="50" value="7">
+            <span class="hint">Number of people in your pool</span>
+        </div>
+
+        <div class="form-group">
+            <label for="scoring_preset">Scoring</label>
+            <select id="scoring_preset" name="scoring_preset">
+                <option value="family" selected>Family Pool (1-2-3-4-4-5)</option>
+                <option value="standard">Standard (1-2-3-4-5-6)</option>
+                <option value="espn">ESPN (10-20-40-80-160-320)</option>
+                <option value="custom">Custom...</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="accuracy_weight">Strategy Balance</label>
+            <input type="range" id="accuracy_weight" name="accuracy_weight"
+                   min="0" max="1" step="0.05" value="0.75">
+            <div class="range-labels">
+                <span>Contrarian</span>
+                <span id="accuracy-value">0.75</span>
+                <span>Accurate</span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="sims">Simulations</label>
+            <select id="sims" name="sims">
+                <option value="1000">1,000 (fast)</option>
+                <option value="5000">5,000 (balanced)</option>
+                <option value="10000" selected>10,000 (recommended)</option>
+                <option value="25000">25,000 (thorough)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="force_champion">Force Champion (optional)</label>
+            <input type="text" id="force_champion" name="force_champion"
+                   list="team-list" placeholder="e.g. Duke" autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Custom scoring (hidden by default) -->
+    <div id="custom-scoring" class="custom-scoring hidden">
+        <h3>Custom Round Scoring</h3>
+        <div class="scoring-grid">
+            <div class="form-group">
+                <label>R64</label>
+                <input type="number" name="round_1_pts" value="1" min="0">
+            </div>
+            <div class="form-group">
+                <label>R32</label>
+                <input type="number" name="round_2_pts" value="2" min="0">
+            </div>
+            <div class="form-group">
+                <label>S16</label>
+                <input type="number" name="round_3_pts" value="3" min="0">
+            </div>
+            <div class="form-group">
+                <label>E8</label>
+                <input type="number" name="round_4_pts" value="4" min="0">
+            </div>
+            <div class="form-group">
+                <label>F4</label>
+                <input type="number" name="round_5_pts" value="4" min="0">
+            </div>
+            <div class="form-group">
+                <label>Champ</label>
+                <input type="number" name="round_6_pts" value="5" min="0">
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Biases -->
+    <details class="biases-section">
+        <summary><h2 style="display:inline">Team Biases</h2> <span class="hint">(Advanced)</span></summary>
+        <p class="bias-hint">Adjust if your pool over- or under-picks certain teams (e.g. "my pool is mostly Ohio State grads").</p>
+        <div id="biases-container">
+            <div class="bias-row">
+                <input type="text" name="bias_team" list="team-list" placeholder="Team name" autocomplete="off">
+                <select name="bias_direction">
+                    <option value="over-picked">Over-picked</option>
+                    <option value="under-picked">Under-picked</option>
+                </select>
+                <select name="bias_magnitude">
+                    <option value="slight">Slight</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="heavy">Heavy</option>
+                </select>
+                <button type="button" class="btn-icon remove-bias" title="Remove">&times;</button>
+            </div>
+        </div>
+        <button type="button" id="add-bias" class="btn-secondary">+ Add Bias</button>
+    </details>
+
+    <datalist id="team-list">
+        {% for team in teams %}
+        <option value="{{ team }}">
+        {% endfor %}
+    </datalist>
+
+    <button type="submit" class="btn-primary" id="submit-btn">Optimize My Bracket</button>
+</form>
+{% endblock %}

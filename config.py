@@ -16,6 +16,13 @@ DEFAULT_POOL_SIZE = 7
 # Optimizer settings
 DEFAULT_SIMULATIONS = 10_000
 DEFAULT_ACCURACY_WEIGHT = 0.75  # 0=full contrarian, 1=full accuracy
+
+# Scoring presets for common pool formats
+SCORING_PRESETS = {
+    "family": {1: 1, 2: 2, 3: 3, 4: 4, 5: 4, 6: 5},
+    "standard": {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6},
+    "espn": {1: 10, 2: 20, 3: 40, 4: 80, 5: 160, 6: 320},
+}
 F4_CANDIDATES_PER_REGION = 8   # Top N teams per region to consider for Final Four
 
 # Bracket structure

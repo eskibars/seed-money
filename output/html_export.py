@@ -162,6 +162,7 @@ def _render_region_left(region: dict) -> str:
     name = region["name"]
 
     r1_html = "\n".join(_render_matchup_r1(m) for m in region["r1"])
+    r1w_html = "\n".join(_render_later_round(m) for m in region["r1"])
     r2_html = "\n".join(_render_later_round(m) for m in region["r2"])
     r3_html = "\n".join(_render_later_round(m) for m in region["r3"])
     r4_html = _render_later_round(region["r4"])
@@ -170,6 +171,7 @@ def _render_region_left(region: dict) -> str:
   <div class="region-label">{name}</div>
   <div class="rounds">
     <div class="round r1">{r1_html}</div>
+    <div class="round r1w">{r1w_html}</div>
     <div class="round r2">{r2_html}</div>
     <div class="round r3">{r3_html}</div>
     <div class="round r4">{r4_html}</div>
@@ -182,6 +184,7 @@ def _render_region_right(region: dict) -> str:
     name = region["name"]
 
     r1_html = "\n".join(_render_matchup_r1(m) for m in region["r1"])
+    r1w_html = "\n".join(_render_later_round(m) for m in region["r1"])
     r2_html = "\n".join(_render_later_round(m) for m in region["r2"])
     r3_html = "\n".join(_render_later_round(m) for m in region["r3"])
     r4_html = _render_later_round(region["r4"])
@@ -192,6 +195,7 @@ def _render_region_right(region: dict) -> str:
     <div class="round r4">{r4_html}</div>
     <div class="round r3">{r3_html}</div>
     <div class="round r2">{r2_html}</div>
+    <div class="round r1w">{r1w_html}</div>
     <div class="round r1">{r1_html}</div>
   </div>
 </div>'''
@@ -266,23 +270,18 @@ def _render_html(title, left_top, left_bot, right_top, right_bot, final_four):
 
   /* ---------- MAIN GRID ---------- */
   .bracket {{
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 0;
-    max-width: 1400px;
+    display: flex;
+    max-width: 1600px;
     margin: 0 auto;
     align-items: stretch;
   }}
-
-  .bracket > .left-col  {{ grid-column: 1; }}
-  .bracket > .center    {{ grid-column: 2; grid-row: 1 / 3; }}
-  .bracket > .right-col {{ grid-column: 3; }}
 
   .left-col, .right-col {{
     display: flex;
     flex-direction: column;
     gap: 20px;
+    flex: 1;
+    min-width: 0;
   }}
 
   /* ---------- REGION ---------- */

@@ -73,6 +73,18 @@ def load_bracket_from_json(filepath: str, ratings: dict[str, dict] | None = None
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    bracket = load_bracket_from_dict(data, ratings)
+    print(f"Loaded bracket from {filepath}: {len(bracket.teams)} teams in {len(bracket.regions)} regions")
+    return bracket
+
+
+def load_bracket_from_dict(data: dict, ratings: dict[str, dict] | None = None) -> Bracket:
+    """Load bracket from a parsed dict (same format as the JSON file).
+
+    Args:
+        data: {"regions": [{"name": "East", "teams": {"1": "Duke", ...}}, ...]}
+        ratings: Optional pre-loaded team ratings
+    """
     bracket = Bracket()
 
     for region_idx, region_data in enumerate(data["regions"]):
@@ -95,7 +107,6 @@ def load_bracket_from_json(filepath: str, ratings: dict[str, dict] | None = None
 
         bracket.set_teams_for_region(region_idx, region_name, teams_by_seed)
 
-    print(f"Loaded bracket from {filepath}: {len(bracket.teams)} teams in {len(bracket.regions)} regions")
     return bracket
 
 
