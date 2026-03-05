@@ -21,6 +21,37 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // Upset bonus mode toggle
+    const upsetMode = document.getElementById("upset_mode");
+    const multFields = document.getElementById("upset-multiplier-fields");
+    const fixedFields = document.getElementById("upset-fixed-fields");
+
+    function updateUpsetFields() {
+        if (!upsetMode) return;
+        const mode = upsetMode.value;
+
+        // Show/hide field groups
+        if (multFields) multFields.classList.toggle("hidden", mode !== "multiplier");
+        if (fixedFields) fixedFields.classList.toggle("hidden", mode !== "fixed");
+
+        // Disable hidden inputs so only the active set submits
+        if (multFields) {
+            multFields.querySelectorAll("input").forEach(inp => {
+                inp.disabled = mode !== "multiplier";
+            });
+        }
+        if (fixedFields) {
+            fixedFields.querySelectorAll("input").forEach(inp => {
+                inp.disabled = mode !== "fixed";
+            });
+        }
+    }
+
+    if (upsetMode) {
+        upsetMode.addEventListener("change", updateUpsetFields);
+        updateUpsetFields(); // Initialize on page load
+    }
+
     // Add bias row
     const addBiasBtn = document.getElementById("add-bias");
     const biasContainer = document.getElementById("biases-container");

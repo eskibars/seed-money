@@ -192,6 +192,24 @@ input[type="range"] {
     display: none !important;
 }
 
+/* Upset Bonus */
+.upset-section {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: var(--color-surface-2);
+    border-radius: var(--radius);
+}
+
+.upset-section h3 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-text);
+}
+
+.upset-fields {
+    margin-top: 0.75rem;
+}
+
 /* Biases */
 .biases-section {
     margin: 1.5rem 0;

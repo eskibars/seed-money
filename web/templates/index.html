@@ -76,6 +76,48 @@
         </div>
     </div>
 
+    <!-- Upset Bonus -->
+    <div class="upset-section">
+        <h3>Upset Bonus</h3>
+        <p class="hint">Award extra points when a lower-seeded team wins.</p>
+        <div class="form-group" style="margin-bottom: 1rem;">
+            <select id="upset_mode" name="upset_mode">
+                <option value="none" selected>None</option>
+                <option value="multiplier">Seed Difference Multiplier</option>
+                <option value="fixed">Fixed Bonus</option>
+            </select>
+        </div>
+
+        <div id="upset-multiplier-fields" class="upset-fields hidden">
+            <p class="hint" style="margin-bottom: 0.75rem;">
+                Points per seed difference. E.g. if set to 2.5 and a 12-seed beats a 5-seed:
+                base pts + (12&minus;5) &times; 2.5 = base + 17.5
+            </p>
+            <div class="scoring-grid">
+                <div class="form-group"><label>R64</label><input type="number" name="upset_r1" value="1" min="0" step="0.5" class="upset-mult"></div>
+                <div class="form-group"><label>R32</label><input type="number" name="upset_r2" value="1" min="0" step="0.5" class="upset-mult"></div>
+                <div class="form-group"><label>S16</label><input type="number" name="upset_r3" value="1" min="0" step="0.5" class="upset-mult"></div>
+                <div class="form-group"><label>E8</label><input type="number" name="upset_r4" value="1.5" min="0" step="0.5" class="upset-mult"></div>
+                <div class="form-group"><label>F4</label><input type="number" name="upset_r5" value="2" min="0" step="0.5" class="upset-mult"></div>
+                <div class="form-group"><label>Champ</label><input type="number" name="upset_r6" value="2.5" min="0" step="0.5" class="upset-mult"></div>
+            </div>
+        </div>
+
+        <div id="upset-fixed-fields" class="upset-fields hidden">
+            <p class="hint" style="margin-bottom: 0.75rem;">
+                Flat bonus points for any upset win, regardless of seed difference.
+            </p>
+            <div class="scoring-grid">
+                <div class="form-group"><label>R64</label><input type="number" name="upset_r1" value="2" min="0" step="1" class="upset-fixed"></div>
+                <div class="form-group"><label>R32</label><input type="number" name="upset_r2" value="3" min="0" step="1" class="upset-fixed"></div>
+                <div class="form-group"><label>S16</label><input type="number" name="upset_r3" value="5" min="0" step="1" class="upset-fixed"></div>
+                <div class="form-group"><label>E8</label><input type="number" name="upset_r4" value="8" min="0" step="1" class="upset-fixed"></div>
+                <div class="form-group"><label>F4</label><input type="number" name="upset_r5" value="10" min="0" step="1" class="upset-fixed"></div>
+                <div class="form-group"><label>Champ</label><input type="number" name="upset_r6" value="15" min="0" step="1" class="upset-fixed"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Team Biases -->
     <details class="biases-section">
         <summary><h2 style="display:inline">Team Biases</h2> <span class="hint">(Advanced)</span></summary>

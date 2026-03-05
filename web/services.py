@@ -66,6 +66,30 @@ def resolve_scoring(job_config):
     return config.SCORING_PRESETS.get(preset, config.ROUND_POINTS)
 
 
+def resolve_upset_config(job_config):
+    """Parse upset bonus configuration from job config.
+
+    Returns:
+        (upset_mode, upset_values) tuple.
+        upset_mode: "multiplier", "fixed", or None
+        upset_values: {round: value} or None
+    """
+    upset_mode = job_config.get("upset_mode")
+    if not upset_mode or upset_mode == "none":
+        return None, None
+
+    upset_values = {}
+    for i in range(1, 7):
+        key = f"upset_r{i}"
+        val = job_config.get(key, 0)
+        try:
+            upset_values[i] = float(val)
+        except (ValueError, TypeError):
+            upset_values[i] = 0.0
+
+    return upset_mode, upset_values
+
+
 def run_optimization(job_id, job_config, conn):
     """Full optimization pipeline. Returns paths to generated files.
 
@@ -110,6 +134,7 @@ def run_optimization(job_id, job_config, conn):
     pool_size = int(job_config.get("pool_size", config.DEFAULT_POOL_SIZE))
     accuracy_weight = float(job_config.get("accuracy_weight", config.DEFAULT_ACCURACY_WEIGHT))
     force_champion = job_config.get("force_champion") or None
+    upset_mode, upset_values = resolve_upset_config(job_config)
 
     optimized = optimize(
         bracket=bracket,
@@ -121,6 +146,8 @@ def run_optimization(job_id, job_config, conn):
         force_champion=force_champion,
         round_points=round_points,
         quiet=True,
+        upset_mode=upset_mode,
+        upset_values=upset_values,
     )
 
     # Generate output files

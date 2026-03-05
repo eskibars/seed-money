@@ -58,6 +58,13 @@ def create_app():
             for i in range(1, 7):
                 job_config[f"round_{i}_pts"] = request.form.get(f"round_{i}_pts", str(i))
 
+        # Upset bonus
+        upset_mode = request.form.get("upset_mode", "none")
+        if upset_mode in ("multiplier", "fixed"):
+            job_config["upset_mode"] = upset_mode
+            for i in range(1, 7):
+                job_config[f"upset_r{i}"] = request.form.get(f"upset_r{i}", "0")
+
         # Biases
         biases = []
         bias_teams = request.form.getlist("bias_team")

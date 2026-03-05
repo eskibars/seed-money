@@ -2,7 +2,7 @@
 
 Uses a two-phase approach:
 1. Exhaustive search over late-round picks (Final Four + Championship)
-2. Greedy backward fill for earlier rounds
+2. Greedy forward fill for earlier rounds
 
 The goal is to maximize the probability of winning a small family pool,
 not just maximizing expected points.
@@ -17,7 +17,7 @@ import config
 from models.bracket import Bracket
 from models.probability import log5
 from models.team import Team
-from optimizer.scorer import score_bracket
+from optimizer.scorer import score_bracket, compute_game_points
 from optimizer.simulator import simulate_once_flat
 from optimizer.pool_model import generate_opponent_bracket
 
@@ -31,7 +31,9 @@ def optimize(bracket: Bracket,
              seed: int | None = 42,
              force_champion: str | None = None,
              round_points: dict[int, int] | None = None,
-             quiet: bool = False) -> Bracket:
+             quiet: bool = False,
+             upset_mode: str | None = None,
+             upset_values: dict[int, float] | None = None) -> Bracket:
     """Optimize a bracket for maximum pool win probability.
 
     Args:
@@ -45,6 +47,8 @@ def optimize(bracket: Bracket,
         force_champion: Force a specific team as champion (optional)
         round_points: Custom scoring per round (defaults to config.ROUND_POINTS)
         quiet: Suppress print output (for web usage)
+        upset_mode: "multiplier" or "fixed" (or None for no upset bonus)
+        upset_values: {round: value} — per-round multiplier or fixed bonus
 
     Returns:
         Optimized bracket with all 63 game slots filled
@@ -61,7 +65,7 @@ def optimize(bracket: Bracket,
     _print("\n=== Phase 1: Optimizing Final Four and Championship ===")
     late_round_config = _optimize_late_rounds(
         bracket, reach_probs, pick_pcts, pool_size, accuracy_weight,
-        rng, n_sims, force_champion, rp, quiet
+        rng, n_sims, force_champion, rp, quiet, upset_mode, upset_values
     )
 
     champion, f4_teams, semi_winners = late_round_config
@@ -72,25 +76,30 @@ def optimize(bracket: Bracket,
     _print("\n=== Phase 2: Filling bracket ===")
     result = _fill_bracket_forward(
         result, champion, f4_teams, semi_winners,
-        reach_probs, pick_pcts, pool_size, accuracy_weight, rp
+        reach_probs, pick_pcts, pool_size, accuracy_weight, rp,
+        upset_mode, upset_values
     )
 
     # Phase 3: Validate with Monte Carlo
     _print(f"\n=== Phase 3: Validating ({n_sims} simulations) ===")
-    win_rate, avg_score = _validate(result, bracket, pick_pcts, pool_size, n_sims, rng, rp, quiet)
+    win_rate, avg_score = _validate(
+        result, bracket, pick_pcts, pool_size, n_sims, rng, rp, quiet,
+        upset_mode, upset_values
+    )
 
     max_score = sum(config.GAMES_PER_ROUND[r] * rp[r] for r in range(1, 7))
     baseline = 1.0 / pool_size
     _print(f"  Expected pool win rate: {win_rate:.1%} (baseline: {baseline:.1%})")
     _print(f"  Advantage: {win_rate / baseline:.1f}x over random")
-    _print(f"  Expected score: {avg_score:.1f} / {max_score}")
+    _print(f"  Expected score: {avg_score:.1f} / {max_score} (base pts, excl. upset bonus)")
 
     return result
 
 
 def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
                           accuracy_weight, rng, n_sims, force_champion,
-                          round_points=None, quiet=False):
+                          round_points=None, quiet=False,
+                          upset_mode=None, upset_values=None):
     """Exhaustive search over Final Four + Championship combinations."""
     rp = round_points or config.ROUND_POINTS
 
@@ -133,16 +142,22 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
 
         # Semifinal 1: region 0 vs region 1
         for semi1_winner in [f4[0], f4[1]]:
+            semi1_loser = f4[1] if semi1_winner == f4[0] else f4[0]
             # Semifinal 2: region 2 vs region 3
             for semi2_winner in [f4[2], f4[3]]:
+                semi2_loser = f4[3] if semi2_winner == f4[2] else f4[2]
                 for champ in [semi1_winner, semi2_winner]:
                     if force_champion and champ.name != force_champion:
                         continue
+                    champ_loser = semi2_winner if champ == semi1_winner else semi1_winner
 
                     total_combos += 1
                     score = _quick_eval_late_rounds(
-                        f4, semi1_winner, semi2_winner, champ,
-                        reach_probs, pick_pcts, pool_size, accuracy_weight, rp
+                        f4, semi1_winner, semi1_loser,
+                        semi2_winner, semi2_loser,
+                        champ, champ_loser,
+                        reach_probs, pick_pcts, pool_size, accuracy_weight, rp,
+                        upset_mode, upset_values
                     )
                     if score > best_score:
                         best_score = score
@@ -165,40 +180,47 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
     return best_config
 
 
-def _quick_eval_late_rounds(f4_teams, semi1_winner, semi2_winner, champion,
+def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
+                            semi2_winner, semi2_loser,
+                            champion, champ_loser,
                             reach_probs, pick_pcts, pool_size, accuracy_weight,
-                            round_points=None):
+                            round_points=None,
+                            upset_mode=None, upset_values=None):
     """Quick scoring of a late-round configuration using EMV formula.
 
     No simulation needed — uses pre-computed reach probabilities.
+    Now accounts for upset bonuses in semifinal and championship matchups.
     """
     rp = round_points or config.ROUND_POINTS
     total_emv = 0.0
 
     # Score Final Four picks (round 4 = Elite Eight, scoring for reaching F4)
+    # No upset bonus here since we don't know the exact E8 matchup opponent
     for team in f4_teams:
         p_reach = reach_probs.get(team.name, {}).get(5, 0.0)
         pick_frac = pick_pcts.get(team.name, {}).get(5, _default_pick_pct(team.seed, 5))
         emv = _compute_emv(p_reach, pick_frac, rp[4], pool_size, accuracy_weight)
         total_emv += emv
 
-    # Score semifinal winners (round 5 = Final Four)
-    for team in [semi1_winner, semi2_winner]:
-        p_reach = reach_probs.get(team.name, {}).get(6, 0.0)
-        pick_frac = pick_pcts.get(team.name, {}).get(6, _default_pick_pct(team.seed, 6))
-        emv = _compute_emv(p_reach, pick_frac, rp[5], pool_size, accuracy_weight)
+    # Score semifinal winners (round 5 = Final Four) — matchups are known
+    for winner, loser in [(semi1_winner, semi1_loser), (semi2_winner, semi2_loser)]:
+        p_reach = reach_probs.get(winner.name, {}).get(6, 0.0)
+        pick_frac = pick_pcts.get(winner.name, {}).get(6, _default_pick_pct(winner.seed, 6))
+        pts = compute_game_points(winner, loser, 5, rp, upset_mode, upset_values)
+        emv = _compute_emv(p_reach, pick_frac, pts, pool_size, accuracy_weight)
         total_emv += emv
 
-    # Score champion (round 6 = Championship)
+    # Score champion (round 6 = Championship) — matchup is known
     p_champ = reach_probs.get(champion.name, {}).get(7, 0.0)
     champ_pick = pick_pcts.get(champion.name, {}).get(7, _default_pick_pct(champion.seed, 7))
-    emv = _compute_emv(p_champ, champ_pick, rp[6], pool_size, accuracy_weight)
+    champ_pts = compute_game_points(champion, champ_loser, 6, rp, upset_mode, upset_values)
+    emv = _compute_emv(p_champ, champ_pick, champ_pts, pool_size, accuracy_weight)
     total_emv += emv
 
     return total_emv
 
 
-def _compute_emv(p_reach: float, pick_frac: float, points: int,
+def _compute_emv(p_reach: float, pick_frac: float, points: float,
                  pool_size: int, accuracy_weight: float) -> float:
     """Compute Expected Marginal Value for a pick.
 
@@ -217,7 +239,8 @@ def _compute_emv(p_reach: float, pick_frac: float, points: int,
 
 def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
                           reach_probs, pick_pcts, pool_size, accuracy_weight,
-                          round_points=None):
+                          round_points=None,
+                          upset_mode=None, upset_values=None):
     """Fill the bracket working forward from round 1, with late-round picks as constraints.
 
     1. Determine which teams are "forced" (must win every game on their path)
@@ -273,17 +296,24 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
             elif b_forced:
                 result.set_winner(game_slot, team_b)
             else:
-                # Free pick: use EMV
+                # Free pick: use EMV with upset-aware points
+                pts_a = compute_game_points(
+                    team_a, team_b, round_num, rp, upset_mode, upset_values
+                )
+                pts_b = compute_game_points(
+                    team_b, team_a, round_num, rp, upset_mode, upset_values
+                )
+
                 emv_a = _compute_emv(
                     reach_probs.get(team_a.name, {}).get(round_num + 1, 0.0),
                     pick_pcts.get(team_a.name, {}).get(round_num + 1, _default_pick_pct(team_a.seed, round_num + 1)),
-                    rp[round_num],
+                    pts_a,
                     pool_size, accuracy_weight
                 )
                 emv_b = _compute_emv(
                     reach_probs.get(team_b.name, {}).get(round_num + 1, 0.0),
                     pick_pcts.get(team_b.name, {}).get(round_num + 1, _default_pick_pct(team_b.seed, round_num + 1)),
-                    rp[round_num],
+                    pts_b,
                     pool_size, accuracy_weight
                 )
 
@@ -293,7 +323,8 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
 
 
 def _validate(picks, bracket, pick_pcts, pool_size, n_sims, rng,
-              round_points=None, quiet=False):
+              round_points=None, quiet=False,
+              upset_mode=None, upset_values=None):
     """Validate the bracket via Monte Carlo simulation against opponent pool."""
     rp = round_points or config.ROUND_POINTS
     wins = 0
@@ -305,14 +336,14 @@ def _validate(picks, bracket, pick_pcts, pool_size, n_sims, rng,
         actual = simulate_once_flat(bracket, rng)
 
         # Score our bracket
-        my_score = score_bracket(picks, actual, rp)
+        my_score = score_bracket(picks, actual, rp, upset_mode, upset_values)
         total_score += my_score
 
         # Simulate opponents
         max_opp_score = 0
         for _ in range(pool_size - 1):
             opp = generate_opponent_bracket(bracket, pick_pcts, rng)
-            opp_score = score_bracket(opp, actual, rp)
+            opp_score = score_bracket(opp, actual, rp, upset_mode, upset_values)
             max_opp_score = max(max_opp_score, opp_score)
 
         if my_score > max_opp_score:
