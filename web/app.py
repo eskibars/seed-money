@@ -11,7 +11,7 @@ import uuid
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, send_from_directory
 
 from web.database import init_db, get_db, get_job, get_queue_position, get_team_list
 from web.refresh import refresh_all, refresh_bracket
@@ -89,6 +89,11 @@ def create_app():
         conn.close()
 
         return redirect(url_for("job_status", job_id=job_id))
+
+    @app.route('/favicon.ico')
+    def favicon():
+        return send_from_directory(os.path.join(app.root_path, 'static'),
+                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
     @app.route("/jobs/<job_id>")
     def job_status(job_id):
