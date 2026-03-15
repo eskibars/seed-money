@@ -19,7 +19,7 @@ DEFAULT_ACCURACY_WEIGHT = 0.75  # 0=full contrarian, 1=full accuracy
 
 # Scoring presets for common pool formats
 SCORING_PRESETS = {
-    "family": {1: 1, 2: 2, 3: 3, 4: 4, 5: 4, 6: 5},
+    "family": {1: 1, 2: 2, 3: 3, 4: 3, 5: 4, 6: 5},
     "standard": {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6},
     "espn": {1: 10, 2: 20, 3: 40, 4: 80, 5: 160, 6: 320},
 }

@@ -444,6 +444,21 @@ def _render_html(title, left_top, left_bot, right_top, right_bot, final_four):
     font-size: 10px;
   }}
 
+  .support-link {{
+    margin-top: 8px;
+    font-size: 11px;
+  }}
+
+  .support-link a {{
+    color: var(--color-champ);
+    font-weight: 700;
+    text-decoration: none;
+  }}
+
+  .support-link a:hover {{
+    text-decoration: underline;
+  }}
+
   .scoring {{
     display: inline-flex;
     gap: 12px;
@@ -464,6 +479,7 @@ def _render_html(title, left_top, left_bot, right_top, right_bot, final_four):
     .champion-team {{ border-color: #cc8800; color: #cc8800; background: #fff; }}
     .champion-team .seed {{ color: #cc8800; }}
     h1 {{ color: #222; }}
+    .support-link a {{ color: #222; }}
     :root {{ --team-w: 130px; --team-h: 18px; }}
   }}
 </style>
@@ -522,6 +538,9 @@ def _render_html(title, left_top, left_bot, right_top, right_bot, final_four):
     <span>E8: 4pts</span>
     <span>F4: 4pts</span>
     <span>Champ: 5pts</span>
+  </div>
+  <div class="support-link">
+    <a href="https://buymeacoffee.com/shane.connelly" target="_blank" rel="noopener noreferrer">Buy Me a Coffee</a>
   </div>
 </div>
 </body>
