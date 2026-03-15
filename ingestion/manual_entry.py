@@ -35,8 +35,9 @@ def load_pick_pcts_from_csv(filepath: str) -> dict[str, dict[int, float]]:
     """Load public pick percentages from a user-prepared CSV.
 
     Expected columns: team, r1_pct, r2_pct, r3_pct, r4_pct, r5_pct, r6_pct
+    where r1_pct = pick to win the first game and r6_pct = pick to win the title.
     Percentages should be 0-100 (will be converted to 0-1).
-    If only champion % is provided, other rounds are estimated from seed.
+    Stored keys use the optimizer's "reach round N" convention: 2-7.
     """
     df = pd.read_csv(filepath)
     pick_pcts = {}
@@ -45,12 +46,12 @@ def load_pick_pcts_from_csv(filepath: str) -> dict[str, dict[int, float]]:
         name = str(row.iloc[0]).strip()
         pcts = {}
         for r in range(1, 7):
-            col_idx = r  # columns 1-6 map to rounds 1-6
+            col_idx = r  # columns 1-6 map to game wins in rounds 1-6
             if col_idx < len(row):
                 try:
                     val = float(row.iloc[col_idx])
                     # Convert from 0-100 to 0-1 if needed
-                    pcts[r] = val / 100.0 if val > 1.0 else val
+                    pcts[r + 1] = val / 100.0 if val > 1.0 else val
                 except (ValueError, TypeError):
                     pass
 
@@ -81,11 +82,11 @@ def estimate_round_picks_from_champion(champ_pct: float, seed: int) -> dict[int,
 
     multipliers = seed_multipliers.get(seed, default_mult)
 
-    pcts = {6: champ_pct}
+    pcts = {7: champ_pct}
     for r in range(5, 0, -1):
         # Each earlier round should have higher pick %
         # The champion pick % is the minimum; scale up
         base = multipliers.get(r, 0.5)
-        pcts[r] = min(0.99, max(champ_pct, base))
+        pcts[r + 1] = min(0.99, max(champ_pct, base))
 
     return pcts

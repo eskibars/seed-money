@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
+from optimizer.pick_utils import normalize_pick_pcts
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 RAW_DIR = os.path.join(DATA_DIR, "raw")
@@ -122,6 +123,7 @@ def cmd_fetch_picks(args):
         print("You can still run 'optimize' with --no-picks to use probability-only mode.")
         return
 
+    pick_pcts = normalize_pick_pcts(pick_pcts)
     state["pick_pcts"] = pick_pcts
     save_state(state)
     print(f"\nLoaded pick percentages for {len(pick_pcts)} teams")
@@ -168,7 +170,8 @@ def cmd_optimize(args):
         reach_probs = simulate_tournament(bracket, n_sims=args.sims, seed=42)
         state["reach_probs"] = reach_probs
 
-    pick_pcts = state.get("pick_pcts", {})
+    pick_pcts = normalize_pick_pcts(state.get("pick_pcts", {}))
+    state["pick_pcts"] = pick_pcts
     if not pick_pcts and not args.no_picks:
         print("WARNING: No pick percentage data loaded.")
         print("Running in probability-only mode (no contrarian component).")
@@ -204,7 +207,8 @@ def cmd_show(args):
         return
 
     reach_probs = state.get("reach_probs", {})
-    pick_pcts = state.get("pick_pcts", {})
+    pick_pcts = normalize_pick_pcts(state.get("pick_pcts", {}))
+    state["pick_pcts"] = pick_pcts
 
     from output.printer import print_bracket, print_summary_table
     print_bracket(optimized, reach_probs)
@@ -231,7 +235,8 @@ def cmd_export(args):
         from output.html_export import export_bracket_html
         output_path = args.output or os.path.join(DATA_DIR, "bracket.html")
         reach_probs = state.get("reach_probs", {})
-        pick_pcts = state.get("pick_pcts", {})
+        pick_pcts = normalize_pick_pcts(state.get("pick_pcts", {}))
+        state["pick_pcts"] = pick_pcts
         export_bracket_html(optimized, output_path, reach_probs, pick_pcts)
     else:
         print(f"Unknown format: {args.format}")

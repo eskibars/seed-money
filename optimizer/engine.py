@@ -15,11 +15,14 @@ from tqdm import tqdm
 
 import config
 from models.bracket import Bracket
-from models.probability import log5
 from models.team import Team
+from optimizer.pick_utils import get_pick_pct
 from optimizer.scorer import score_bracket, compute_game_points
 from optimizer.simulator import simulate_once_flat
 from optimizer.pool_model import generate_opponent_bracket
+
+LATE_ROUND_SLOTS = (4, 5, 6, 7, 2, 3, 1)
+LATE_ROUND_NUMBERS = {4: 4, 5: 4, 6: 4, 7: 4, 2: 5, 3: 5, 1: 6}
 
 
 def optimize(bracket: Bracket,
@@ -123,16 +126,21 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
         top_n = config.F4_CANDIDATES_PER_REGION
         candidates_per_region.append([t for t, _ in region_teams[:top_n]])
 
-    # Pre-simulate tournaments for fast evaluation
-    pre_sims = min(2000, n_sims)
+    # Pre-simulate tournaments for fast, path-aware late-round evaluation
+    pre_sims = min(1000, n_sims)
     _print(f"  Pre-simulating {pre_sims} tournaments for evaluation...")
-    sim_results = []
-    for _ in range(pre_sims):
-        sim_results.append(simulate_once_flat(bracket, rng))
+    sim_results = [simulate_once_flat(bracket, rng) for _ in range(pre_sims)]
+    slot_candidates = _build_late_round_slot_candidates(candidates_per_region)
+    score_cache = _precompute_late_round_scores(
+        sim_results, slot_candidates, rp, upset_mode, upset_values
+    )
+    opp_max_scores = _precompute_opponent_late_round_scores(
+        bracket, pick_pcts, pool_size, sim_results, rng, rp, upset_mode, upset_values
+    )
 
     # Enumerate all F4 combos x semifinal winners x champion
     # Regions 0,1 feed into semifinal at slot 2; regions 2,3 feed into semifinal at slot 3
-    best_score = -1
+    best_score = None
     best_config = None
     total_combos = 0
 
@@ -152,14 +160,22 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
                     champ_loser = semi2_winner if champ == semi1_winner else semi1_winner
 
                     total_combos += 1
-                    score = _quick_eval_late_rounds(
+                    late_win_rate, avg_late_score = _evaluate_late_rounds_from_sims(
+                        f4, semi1_winner, semi2_winner, champ, score_cache, opp_max_scores, pool_size
+                    )
+                    heuristic_score = _quick_eval_late_rounds(
                         f4, semi1_winner, semi1_loser,
                         semi2_winner, semi2_loser,
                         champ, champ_loser,
                         reach_probs, pick_pcts, pool_size, accuracy_weight, rp,
                         upset_mode, upset_values
                     )
-                    if score > best_score:
+                    score = (
+                        late_win_rate,
+                        accuracy_weight * avg_late_score + (1 - accuracy_weight) * heuristic_score,
+                        heuristic_score,
+                    )
+                    if best_score is None or score > best_score:
                         best_score = score
                         best_config = (champ, list(f4), [semi1_winner, semi2_winner])
 
@@ -197,22 +213,22 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
     # Score Final Four picks (round 4 = Elite Eight, scoring for reaching F4)
     # No upset bonus here since we don't know the exact E8 matchup opponent
     for team in f4_teams:
-        p_reach = reach_probs.get(team.name, {}).get(5, 0.0)
-        pick_frac = pick_pcts.get(team.name, {}).get(5, _default_pick_pct(team.seed, 5))
+        p_reach = _conditional_advance_prob(team, 4, reach_probs)
+        pick_frac = get_pick_pct(pick_pcts, team.name, 5, _default_pick_pct(team.seed, 5))
         emv = _compute_emv(p_reach, pick_frac, rp[4], pool_size, accuracy_weight)
         total_emv += emv
 
-    # Score semifinal winners (round 5 = Final Four) — matchups are known
+    # Score semifinal winners (round 5 = Final Four)
     for winner, loser in [(semi1_winner, semi1_loser), (semi2_winner, semi2_loser)]:
-        p_reach = reach_probs.get(winner.name, {}).get(6, 0.0)
-        pick_frac = pick_pcts.get(winner.name, {}).get(6, _default_pick_pct(winner.seed, 6))
+        p_reach = _conditional_advance_prob(winner, 5, reach_probs)
+        pick_frac = get_pick_pct(pick_pcts, winner.name, 6, _default_pick_pct(winner.seed, 6))
         pts = compute_game_points(winner, loser, 5, rp, upset_mode, upset_values)
         emv = _compute_emv(p_reach, pick_frac, pts, pool_size, accuracy_weight)
         total_emv += emv
 
-    # Score champion (round 6 = Championship) — matchup is known
-    p_champ = reach_probs.get(champion.name, {}).get(7, 0.0)
-    champ_pick = pick_pcts.get(champion.name, {}).get(7, _default_pick_pct(champion.seed, 7))
+    # Score champion (round 6 = Championship)
+    p_champ = _conditional_advance_prob(champion, 6, reach_probs)
+    champ_pick = get_pick_pct(pick_pcts, champion.name, 7, _default_pick_pct(champion.seed, 7))
     champ_pts = compute_game_points(champion, champ_loser, 6, rp, upset_mode, upset_values)
     emv = _compute_emv(p_champ, champ_pick, champ_pts, pool_size, accuracy_weight)
     total_emv += emv
@@ -305,14 +321,14 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
                 )
 
                 emv_a = _compute_emv(
-                    reach_probs.get(team_a.name, {}).get(round_num + 1, 0.0),
-                    pick_pcts.get(team_a.name, {}).get(round_num + 1, _default_pick_pct(team_a.seed, round_num + 1)),
+                    _conditional_advance_prob(team_a, round_num, reach_probs),
+                    get_pick_pct(pick_pcts, team_a.name, round_num + 1, _default_pick_pct(team_a.seed, round_num + 1)),
                     pts_a,
                     pool_size, accuracy_weight
                 )
                 emv_b = _compute_emv(
-                    reach_probs.get(team_b.name, {}).get(round_num + 1, 0.0),
-                    pick_pcts.get(team_b.name, {}).get(round_num + 1, _default_pick_pct(team_b.seed, round_num + 1)),
+                    _conditional_advance_prob(team_b, round_num, reach_probs),
+                    get_pick_pct(pick_pcts, team_b.name, round_num + 1, _default_pick_pct(team_b.seed, round_num + 1)),
                     pts_b,
                     pool_size, accuracy_weight
                 )
@@ -380,3 +396,153 @@ def _default_pick_pct(seed: int, round_reaching: int) -> float:
 
     seed_defaults = defaults.get(seed, defaults[8])
     return seed_defaults.get(round_reaching, 0.01)
+
+
+def _conditional_advance_prob(team: Team,
+                              round_num: int,
+                              reach_probs: dict[str, dict[int, float]]) -> float:
+    """Estimate P(team wins this round | team reached this round)."""
+    rounds = reach_probs.get(team.name, {})
+    p_current = rounds.get(round_num, 1.0 if round_num == 1 else 0.0)
+    p_next = rounds.get(round_num + 1, 0.0)
+    if p_current <= 0:
+        return 0.0
+    return max(0.0, min(1.0, p_next / p_current))
+
+
+def _build_late_round_slot_candidates(candidates_per_region: list[list[Team]]) -> dict[int, list[Team]]:
+    """Build the candidate team list for each late-round slot."""
+    return {
+        4: candidates_per_region[0],
+        5: candidates_per_region[1],
+        6: candidates_per_region[2],
+        7: candidates_per_region[3],
+        2: _unique_teams(candidates_per_region[0] + candidates_per_region[1]),
+        3: _unique_teams(candidates_per_region[2] + candidates_per_region[3]),
+        1: _unique_teams(
+            candidates_per_region[0]
+            + candidates_per_region[1]
+            + candidates_per_region[2]
+            + candidates_per_region[3]
+        ),
+    }
+
+
+def _unique_teams(teams: list[Team]) -> list[Team]:
+    """Preserve order while removing duplicate teams."""
+    seen = set()
+    result = []
+    for team in teams:
+        if team.name in seen:
+            continue
+        seen.add(team.name)
+        result.append(team)
+    return result
+
+
+def _precompute_late_round_scores(sim_results: list[list[Team | None]],
+                                  slot_candidates: dict[int, list[Team]],
+                                  round_points: dict[int, int],
+                                  upset_mode: str | None,
+                                  upset_values: dict[int, float] | None) -> dict[int, dict[str, np.ndarray]]:
+    """Precompute late-round score arrays for every slot/team candidate pair."""
+    score_cache: dict[int, dict[str, np.ndarray]] = {}
+    n_sims = len(sim_results)
+
+    for slot, teams in slot_candidates.items():
+        score_cache[slot] = {}
+        for team in teams:
+            scores = np.zeros(n_sims, dtype=float)
+            for sim_idx, actual in enumerate(sim_results):
+                scores[sim_idx] = _score_single_pick(
+                    team, slot, actual, round_points, upset_mode, upset_values
+                )
+            score_cache[slot][team.name] = scores
+
+    return score_cache
+
+
+def _precompute_opponent_late_round_scores(bracket: Bracket,
+                                           pick_pcts: dict[str, dict[int, float]],
+                                           pool_size: int,
+                                           sim_results: list[list[Team | None]],
+                                           rng: np.random.Generator,
+                                           round_points: dict[int, int],
+                                           upset_mode: str | None,
+                                           upset_values: dict[int, float] | None) -> np.ndarray:
+    """Simulate opponents once per tournament sim and keep the best late-round score."""
+    opp_max_scores = np.zeros(len(sim_results), dtype=float)
+    if pool_size <= 1:
+        return opp_max_scores
+
+    for sim_idx, actual in enumerate(sim_results):
+        max_score = 0.0
+        for _ in range(pool_size - 1):
+            opp = generate_opponent_bracket(bracket, pick_pcts, rng)
+            opp_score = _score_late_rounds(opp.slots, actual, round_points, upset_mode, upset_values)
+            max_score = max(max_score, opp_score)
+        opp_max_scores[sim_idx] = max_score
+
+    return opp_max_scores
+
+
+def _evaluate_late_rounds_from_sims(f4_teams: list[Team],
+                                    semi1_winner: Team,
+                                    semi2_winner: Team,
+                                    champion: Team,
+                                    score_cache: dict[int, dict[str, np.ndarray]],
+                                    opp_max_scores: np.ndarray,
+                                    pool_size: int) -> tuple[float, float]:
+    """Estimate late-round pool edge directly from simulated tournament outcomes."""
+    our_scores = np.add.reduce((
+        score_cache[4][f4_teams[0].name],
+        score_cache[5][f4_teams[1].name],
+        score_cache[6][f4_teams[2].name],
+        score_cache[7][f4_teams[3].name],
+        score_cache[2][semi1_winner.name],
+        score_cache[3][semi2_winner.name],
+        score_cache[1][champion.name],
+    ))
+    late_win_rate = 1.0 if pool_size <= 1 else float(np.mean(our_scores > opp_max_scores))
+    avg_late_score = float(np.mean(our_scores))
+    return late_win_rate, avg_late_score
+
+
+def _score_late_rounds(pick_slots: list[Team | None],
+                       actual: list[Team | None],
+                       round_points: dict[int, int],
+                       upset_mode: str | None,
+                       upset_values: dict[int, float] | None) -> float:
+    """Score only the Elite Eight, Final Four, and Championship slots."""
+    total = 0.0
+    for slot in LATE_ROUND_SLOTS:
+        total += _score_single_pick(
+            pick_slots[slot], slot, actual, round_points, upset_mode, upset_values
+        )
+    return total
+
+
+def _score_single_pick(picked_team: Team | None,
+                       game_slot: int,
+                       actual: list[Team | None],
+                       round_points: dict[int, int],
+                       upset_mode: str | None,
+                       upset_values: dict[int, float] | None) -> float:
+    """Score one picked slot against a simulated tournament result."""
+    actual_winner = actual[game_slot]
+    if picked_team is None or actual_winner is None or picked_team != actual_winner:
+        return 0.0
+
+    round_num = LATE_ROUND_NUMBERS[game_slot]
+    left_slot = 2 * game_slot
+    right_slot = left_slot + 1
+    left_team = actual[left_slot] if left_slot < len(actual) else None
+    right_team = actual[right_slot] if right_slot < len(actual) else None
+
+    if left_team and right_team:
+        loser = right_team if actual_winner == left_team else left_team
+        return compute_game_points(
+            actual_winner, loser, round_num, round_points, upset_mode, upset_values
+        )
+
+    return round_points[round_num]

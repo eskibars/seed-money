@@ -19,7 +19,9 @@ def fetch_espn_picks(save: bool = True) -> dict[str, dict[int, float]]:
     """Scrape ESPN Tournament Challenge pick percentages.
 
     Returns:
-        {team_name: {round: pick_fraction}} where fraction is 0-1
+        {team_name: {round: pick_fraction}} where fraction is 0-1.
+        Keys use the optimizer's "reach round N" convention:
+        2 = win first game, 7 = win championship.
     """
     print(f"Fetching ESPN pick percentages from {ESPN_PICKS_URL}...")
 
@@ -50,7 +52,9 @@ def fetch_yahoo_picks(save: bool = True) -> dict[str, dict[int, float]]:
     """Scrape Yahoo Bracket pick distribution.
 
     Returns:
-        {team_name: {round: pick_fraction}} where fraction is 0-1
+        {team_name: {round: pick_fraction}} where fraction is 0-1.
+        Keys use the optimizer's "reach round N" convention:
+        2 = win first game, 7 = win championship.
     """
     print(f"Fetching Yahoo pick percentages from {YAHOO_PICKS_URL}...")
 
@@ -107,7 +111,7 @@ def _parse_espn_picks(html: str) -> dict[str, dict[int, float]]:
             continue
 
         pcts = {}
-        round_num = 1
+        round_num = 2
         for cell in cells:
             text = cell.get_text(strip=True).replace("%", "")
             try:
@@ -150,7 +154,7 @@ def _parse_yahoo_picks(html: str) -> dict[str, dict[int, float]]:
             continue
 
         pcts = {}
-        round_num = 1
+        round_num = 2
         for cell in cells:
             text = cell.get_text(strip=True).replace("%", "")
             try:

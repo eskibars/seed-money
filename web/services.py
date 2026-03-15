@@ -11,6 +11,7 @@ import config
 from ingestion.bracket_loader import load_bracket_from_dict
 from optimizer.simulator import simulate_tournament
 from optimizer.engine import optimize
+from optimizer.pick_utils import normalize_pick_pcts
 from output.html_export import export_bracket_html
 from web.database import get_latest_ratings, get_latest_picks, get_latest_bracket
 
@@ -110,11 +111,7 @@ def run_optimization(job_id, job_config, conn):
         raise RuntimeError("No bracket data available. Upload a bracket first.")
 
     pick_pcts_raw = get_latest_picks(conn) or {}
-
-    # Convert pick_pcts keys back from str to int
-    pick_pcts = {}
-    for team, rounds in pick_pcts_raw.items():
-        pick_pcts[team] = {int(r): v for r, v in rounds.items()}
+    pick_pcts = normalize_pick_pcts(pick_pcts_raw)
 
     # Apply user biases
     biases = job_config.get("biases", [])

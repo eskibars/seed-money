@@ -10,6 +10,7 @@ import numpy as np
 from models.bracket import Bracket
 from models.probability import log5
 from models.team import Team
+from optimizer.pick_utils import get_pick_pct
 
 
 def generate_opponent_bracket(bracket: Bracket, pick_pcts: dict[str, dict[int, float]],
@@ -51,13 +52,10 @@ def _get_pick_prob(team_a: Team, team_b: Team, round_num: int,
 
     Uses pick percentage data when available, falls back to seed-based heuristic.
     """
-    pcts_a = pick_pcts.get(team_a.name, {})
-    pcts_b = pick_pcts.get(team_b.name, {})
+    pct_a = get_pick_pct(pick_pcts, team_a.name, round_num + 1, -1.0)
+    pct_b = get_pick_pct(pick_pcts, team_b.name, round_num + 1, -1.0)
 
-    pct_a = pcts_a.get(round_num + 1)  # pick_pcts are indexed by "reaching round N"
-    pct_b = pcts_b.get(round_num + 1)  # so round_num game winners "reach" round_num+1
-
-    if pct_a is not None and pct_b is not None and (pct_a + pct_b) > 0:
+    if pct_a >= 0 and pct_b >= 0 and (pct_a + pct_b) > 0:
         # Normalize to get head-to-head pick probability
         return pct_a / (pct_a + pct_b)
 
