@@ -12,6 +12,15 @@ import pandas as pd
 import requests
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
+TORVIK_URLS = [
+    "https://barttorvik.com/{year}_team_results.csv",
+    "https://www.barttorvik.com/{year}_team_results.csv",
+]
+TORVIK_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://barttorvik.com/",
+    "Accept": "text/csv,text/plain,*/*",
+}
 
 
 def fetch_torvik_ratings(year: int = 2026, save: bool = True) -> pd.DataFrame:
@@ -24,11 +33,23 @@ def fetch_torvik_ratings(year: int = 2026, save: bool = True) -> pd.DataFrame:
     Returns:
         DataFrame with team ratings
     """
-    url = f"https://barttorvik.com/{year}_team_results.csv"
-    print(f"Fetching Torvik ratings from {url}...")
+    last_error: Exception | None = None
+    resp = None
+    url = ""
+    for url_template in TORVIK_URLS:
+        url = url_template.format(year=year)
+        print(f"Fetching Torvik ratings from {url}...")
+        try:
+            resp = requests.get(url, headers=TORVIK_HEADERS, timeout=30)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            last_error = exc
+            resp = None
 
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
+    if resp is None:
+        assert last_error is not None
+        raise last_error
 
     # Save raw CSV
     os.makedirs(DATA_DIR, exist_ok=True)

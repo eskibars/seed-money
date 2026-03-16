@@ -66,7 +66,7 @@ def refresh_picks(conn, source="espn"):
         if not pick_pcts:
             conn.execute(
                 "INSERT INTO refresh_log (source, status, message) VALUES (?, 'success', ?)",
-                (f"picks:{source}", "No pick data available (tournament not started)")
+                (f"picks:{source}", "No pick data available from public source")
             )
             conn.commit()
             return 0
@@ -172,11 +172,22 @@ def refresh_all(conn, year=2026, bracket_game_key=None):
     except Exception as e:
         results["ratings"] = f"Error: {e}"
 
+    yahoo_pick_error = None
     try:
-        n = refresh_picks(conn, "espn")
-        results["picks"] = f"OK ({n} teams)" if n else "No data available"
+        n = refresh_picks(conn, "yahoo")
+        results["picks"] = f"OK ({n} teams from yahoo)" if n else "No data available (yahoo)"
     except Exception as e:
-        results["picks"] = f"Error: {e}"
+        yahoo_pick_error = e
+
+    if "picks" not in results:
+        try:
+            n = refresh_picks(conn, "espn")
+            results["picks"] = f"OK ({n} teams from espn)" if n else "No data available (espn)"
+        except Exception as e:
+            if yahoo_pick_error is not None:
+                results["picks"] = f"Error: yahoo={yahoo_pick_error}; espn={e}"
+            else:
+                results["picks"] = f"Error: {e}"
 
     try:
         metadata = refresh_bracket(conn, year=year, source="yahoo", game_key=bracket_game_key)
