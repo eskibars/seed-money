@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, send_from_directory
 
 from web.database import init_db, get_db, get_job, get_queue_position, get_team_list
-from web.refresh import refresh_all, refresh_bracket
+from web.refresh import refresh_all
 from web.services import run_optimization, OUTPUT_DIR
 
 ADMIN_KEY = os.environ.get("SEED_MONEY_ADMIN_KEY", "refresh")
@@ -159,19 +159,14 @@ def create_app():
         except ValueError:
             return "Invalid year", 400
 
+        game_key_param = request.args.get("game_key", "").strip() or request.args.get("gameKey", "").strip()
+        try:
+            bracket_game_key = int(game_key_param) if game_key_param else None
+        except ValueError:
+            return "Invalid game_key", 400
+
         conn = get_db()
-        results = refresh_all(conn, year=year)
-
-        # Also load the most relevant local bracket file if it exists
-        bracket_path, bracket_year = _find_local_bracket_file(year)
-        if os.path.exists(bracket_path):
-            with open(bracket_path, "r") as f:
-                bracket_data = json.load(f)
-            refresh_bracket(conn, bracket_data, year=bracket_year)
-            results["bracket"] = f"OK (loaded {os.path.basename(bracket_path)})"
-        else:
-            results["bracket"] = f"No local bracket file found for {year}"
-
+        results = refresh_all(conn, year=year, bracket_game_key=bracket_game_key)
         conn.close()
         return jsonify(results)
 
@@ -225,35 +220,6 @@ def _worker_loop(app):
                 pass
 
             time.sleep(2)
-
-
-def _find_local_bracket_file(preferred_year: int) -> tuple[str, int]:
-    """Find the best local bracket JSON file for refreshes."""
-    raw_dir = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
-    exact = os.path.join(raw_dir, f"bracket_{preferred_year}.json")
-    if os.path.exists(exact):
-        return exact, preferred_year
-
-    generic = os.path.join(raw_dir, "bracket.json")
-    if os.path.exists(generic):
-        return generic, preferred_year
-
-    fallback_year = preferred_year
-    fallback_path = ""
-    if os.path.isdir(raw_dir):
-        for name in os.listdir(raw_dir):
-            if not name.startswith("bracket_") or not name.endswith(".json"):
-                continue
-            year_text = name[len("bracket_"):-len(".json")]
-            if not year_text.isdigit():
-                continue
-            file_year = int(year_text)
-            if not fallback_path or file_year > fallback_year:
-                fallback_year = file_year
-                fallback_path = os.path.join(raw_dir, name)
-
-    return fallback_path, fallback_year
-
 
 if __name__ == "__main__":
     app = create_app()
