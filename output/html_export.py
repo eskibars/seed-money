@@ -8,6 +8,7 @@ two on the right, converging to Final Four in the center.
 import os
 from models.bracket import Bracket
 from models.team import Team
+from optimizer.pick_utils import default_pick_pct, get_pick_pct
 
 
 def export_bracket_html(bracket: Bracket, filepath: str,
@@ -55,9 +56,9 @@ def _team_cell(team: Team | None, is_winner: bool = False,
         p = reach_probs.get(team.name, {}).get(round_num, 0)
         tooltip_parts.append(f"P(reach): {p:.1%}")
     if pick_pcts:
-        pp = pick_pcts.get(team.name, {}).get(round_num or 2, 0)
-        if pp:
-            tooltip_parts.append(f"Public: {pp:.1%}")
+        pick_round = round_num or 2
+        pp = get_pick_pct(pick_pcts, team.name, pick_round, default_pick_pct(team.seed, pick_round))
+        tooltip_parts.append(f"Public: {pp:.1%}")
 
     return {
         "name": team.name,

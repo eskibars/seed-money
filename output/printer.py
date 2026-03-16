@@ -5,6 +5,7 @@ from tabulate import tabulate
 import config
 from models.bracket import Bracket
 from models.team import Team
+from optimizer.pick_utils import default_pick_pct, get_pick_pct
 
 
 def print_bracket(bracket: Bracket, reach_probs: dict[str, dict[int, float]] | None = None):
@@ -117,7 +118,9 @@ def print_summary_table(bracket: Bracket, reach_probs: dict[str, dict[int, float
     champion = bracket.slots[1]
     if champion:
         p = reach_probs.get(champion.name, {}).get(7, 0)
-        pp = (pick_pcts or {}).get(champion.name, {}).get(7, 0)
+        pp = 0
+        if has_pick_data:
+            pp = get_pick_pct(pick_pcts or {}, champion.name, 7, default_pick_pct(champion.seed, 7))
         pp_str = f"{pp:.1%}" if has_pick_data else "N/A"
         leverage_str = f"{p / pp:.1f}x" if pp > 0 else ("N/A" if not has_pick_data else "unique")
         rows.append(["Champion", str(champion), f"{p:.1%}", pp_str, leverage_str])
@@ -127,7 +130,9 @@ def print_summary_table(bracket: Bracket, reach_probs: dict[str, dict[int, float
         team = bracket.slots[slot]
         if team:
             p = reach_probs.get(team.name, {}).get(5, 0)
-            pp = (pick_pcts or {}).get(team.name, {}).get(5, 0)
+            pp = 0
+            if has_pick_data:
+                pp = get_pick_pct(pick_pcts or {}, team.name, 5, default_pick_pct(team.seed, 5))
             pp_str = f"{pp:.1%}" if has_pick_data else "N/A"
             leverage_str = f"{p / pp:.1f}x" if pp > 0 else ("N/A" if not has_pick_data else "unique")
             region = bracket.regions.get(slot - 4, "?")

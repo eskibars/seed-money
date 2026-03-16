@@ -16,7 +16,7 @@ from tqdm import tqdm
 import config
 from models.bracket import Bracket
 from models.team import Team
-from optimizer.pick_utils import get_pick_pct
+from optimizer.pick_utils import default_pick_pct, get_pick_pct
 from optimizer.scorer import score_bracket, compute_game_points
 from optimizer.simulator import simulate_once_flat
 from optimizer.pool_model import generate_opponent_bracket
@@ -214,21 +214,21 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
     # No upset bonus here since we don't know the exact E8 matchup opponent
     for team in f4_teams:
         p_reach = _conditional_advance_prob(team, 4, reach_probs)
-        pick_frac = get_pick_pct(pick_pcts, team.name, 5, _default_pick_pct(team.seed, 5))
+        pick_frac = get_pick_pct(pick_pcts, team.name, 5, default_pick_pct(team.seed, 5))
         emv = _compute_emv(p_reach, pick_frac, rp[4], pool_size, accuracy_weight)
         total_emv += emv
 
     # Score semifinal winners (round 5 = Final Four)
     for winner, loser in [(semi1_winner, semi1_loser), (semi2_winner, semi2_loser)]:
         p_reach = _conditional_advance_prob(winner, 5, reach_probs)
-        pick_frac = get_pick_pct(pick_pcts, winner.name, 6, _default_pick_pct(winner.seed, 6))
+        pick_frac = get_pick_pct(pick_pcts, winner.name, 6, default_pick_pct(winner.seed, 6))
         pts = compute_game_points(winner, loser, 5, rp, upset_mode, upset_values)
         emv = _compute_emv(p_reach, pick_frac, pts, pool_size, accuracy_weight)
         total_emv += emv
 
     # Score champion (round 6 = Championship)
     p_champ = _conditional_advance_prob(champion, 6, reach_probs)
-    champ_pick = get_pick_pct(pick_pcts, champion.name, 7, _default_pick_pct(champion.seed, 7))
+    champ_pick = get_pick_pct(pick_pcts, champion.name, 7, default_pick_pct(champion.seed, 7))
     champ_pts = compute_game_points(champion, champ_loser, 6, rp, upset_mode, upset_values)
     emv = _compute_emv(p_champ, champ_pick, champ_pts, pool_size, accuracy_weight)
     total_emv += emv
@@ -322,13 +322,13 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
 
                 emv_a = _compute_emv(
                     _conditional_advance_prob(team_a, round_num, reach_probs),
-                    get_pick_pct(pick_pcts, team_a.name, round_num + 1, _default_pick_pct(team_a.seed, round_num + 1)),
+                    get_pick_pct(pick_pcts, team_a.name, round_num + 1, default_pick_pct(team_a.seed, round_num + 1)),
                     pts_a,
                     pool_size, accuracy_weight
                 )
                 emv_b = _compute_emv(
                     _conditional_advance_prob(team_b, round_num, reach_probs),
-                    get_pick_pct(pick_pcts, team_b.name, round_num + 1, _default_pick_pct(team_b.seed, round_num + 1)),
+                    get_pick_pct(pick_pcts, team_b.name, round_num + 1, default_pick_pct(team_b.seed, round_num + 1)),
                     pts_b,
                     pool_size, accuracy_weight
                 )
@@ -366,36 +366,6 @@ def _validate(picks, bracket, pick_pcts, pool_size, n_sims, rng,
             wins += 1
 
     return wins / n_sims, total_score / n_sims
-
-
-def _default_pick_pct(seed: int, round_reaching: int) -> float:
-    """Default pick percentage when no data is available.
-
-    Based on rough historical patterns of how the public picks.
-    """
-    # Approximate public pick rates by seed and round
-    # Round 2 = winning first game, Round 7 = winning championship
-    defaults = {
-        1: {2: 0.97, 3: 0.85, 4: 0.65, 5: 0.40, 6: 0.25, 7: 0.15},
-        2: {2: 0.93, 3: 0.72, 4: 0.45, 5: 0.25, 6: 0.13, 7: 0.07},
-        3: {2: 0.85, 3: 0.55, 4: 0.28, 5: 0.12, 6: 0.05, 7: 0.02},
-        4: {2: 0.80, 3: 0.45, 4: 0.20, 5: 0.08, 6: 0.03, 7: 0.01},
-        5: {2: 0.65, 3: 0.30, 4: 0.12, 5: 0.04, 6: 0.01, 7: 0.005},
-        6: {2: 0.62, 3: 0.28, 4: 0.10, 5: 0.03, 6: 0.01, 7: 0.004},
-        7: {2: 0.58, 3: 0.25, 4: 0.08, 5: 0.03, 6: 0.01, 7: 0.003},
-        8: {2: 0.48, 3: 0.18, 4: 0.06, 5: 0.02, 6: 0.005, 7: 0.002},
-        9: {2: 0.42, 3: 0.15, 4: 0.05, 5: 0.015, 6: 0.004, 7: 0.001},
-        10: {2: 0.38, 3: 0.13, 4: 0.04, 5: 0.01, 6: 0.003, 7: 0.001},
-        11: {2: 0.35, 3: 0.12, 4: 0.04, 5: 0.01, 6: 0.003, 7: 0.001},
-        12: {2: 0.32, 3: 0.10, 4: 0.03, 5: 0.008, 6: 0.002, 7: 0.0005},
-        13: {2: 0.18, 3: 0.04, 4: 0.01, 5: 0.002, 6: 0.0005, 7: 0.0001},
-        14: {2: 0.12, 3: 0.02, 4: 0.005, 5: 0.001, 6: 0.0002, 7: 0.00005},
-        15: {2: 0.05, 3: 0.01, 4: 0.002, 5: 0.0004, 6: 0.0001, 7: 0.00002},
-        16: {2: 0.02, 3: 0.003, 4: 0.0005, 5: 0.0001, 6: 0.00002, 7: 0.000005},
-    }
-
-    seed_defaults = defaults.get(seed, defaults[8])
-    return seed_defaults.get(round_reaching, 0.01)
 
 
 def _conditional_advance_prob(team: Team,
