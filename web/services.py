@@ -11,9 +11,9 @@ import config
 from ingestion.bracket_loader import load_bracket_from_dict
 from optimizer.simulator import simulate_tournament
 from optimizer.engine import optimize
-from optimizer.pick_utils import normalize_pick_pcts
+from optimizer.pick_utils import build_consensus_pick_pcts
 from output.html_export import export_bracket_html
-from web.database import get_latest_ratings, get_latest_picks, get_latest_bracket
+from web.database import get_latest_ratings, get_latest_bracket_record, get_pick_sources
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "output", "brackets")
 
@@ -106,12 +106,13 @@ def run_optimization(job_id, job_config, conn):
     if not ratings:
         raise RuntimeError("No ratings data available. Run data refresh first.")
 
-    bracket_data = get_latest_bracket(conn)
-    if not bracket_data:
+    bracket_record = get_latest_bracket_record(conn)
+    if not bracket_record:
         raise RuntimeError("No bracket data available. Upload a bracket first.")
+    bracket_data = bracket_record["data"]
 
-    pick_pcts_raw = get_latest_picks(conn) or {}
-    pick_pcts = normalize_pick_pcts(pick_pcts_raw)
+    pick_sources = get_pick_sources(conn, year=bracket_record["year"])
+    pick_pcts = build_consensus_pick_pcts(pick_sources)
 
     # Apply user biases
     biases = job_config.get("biases", [])

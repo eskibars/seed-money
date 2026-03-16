@@ -1,5 +1,7 @@
 """Central configuration for the March Madness bracket optimizer."""
 
+import os
+
 # Scoring: points awarded per correct pick in each round
 # Round 1 = Round of 64, Round 6 = Championship
 ROUND_POINTS = {1: 1, 2: 2, 3: 3, 4: 4, 5: 4, 6: 5}
@@ -36,3 +38,26 @@ SEED_MATCHUPS = [
     (1, 16), (8, 9), (5, 12), (4, 13),
     (6, 11), (3, 14), (7, 10), (2, 15),
 ]
+
+# Public pick-source blending. Weights are normalized over sources that have
+# an entry for a given team/round, so partial backfills stay safe to blend.
+PICK_SOURCE_WEIGHTS = {
+    "espn": 0.60,
+    "yahoo": 0.40,
+    "ncaa": 0.15,
+    "cbs": 0.10,
+}
+
+# Optional article URLs for partial pick backfills.
+# Rounds use the optimizer's "reach round N" convention:
+# 2 = win first game, 5 = reach Final Four, 7 = win championship.
+NCAA_PICK_ARTICLE_URLS = {
+    7: os.environ.get("SEED_MONEY_NCAA_CHAMPION_URL", ""),
+    5: os.environ.get("SEED_MONEY_NCAA_FINAL_FOUR_URL", ""),
+    2: os.environ.get("SEED_MONEY_NCAA_UPSET_URL", ""),
+}
+CBS_PICK_ARTICLE_URLS = {
+    7: os.environ.get("SEED_MONEY_CBS_CHAMPION_URL", ""),
+    5: os.environ.get("SEED_MONEY_CBS_FINAL_FOUR_URL", ""),
+    2: os.environ.get("SEED_MONEY_CBS_UPSET_URL", ""),
+}

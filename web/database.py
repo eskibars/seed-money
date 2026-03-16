@@ -60,6 +60,7 @@ def init_db(db_path=None):
             refreshed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    _ensure_column(conn, "cached_picks", "year", "INTEGER")
     conn.commit()
     conn.close()
 
@@ -74,14 +75,58 @@ def get_latest_ratings(conn):
     return None
 
 
-def get_latest_picks(conn):
+def get_latest_picks(conn, year=None):
     """Get the most recent cached pick percentages."""
-    row = conn.execute(
-        "SELECT data_json FROM cached_picks ORDER BY fetched_at DESC LIMIT 1"
-    ).fetchone()
+    query = "SELECT data_json FROM cached_picks"
+    params = []
+    if year is not None and _table_has_column(conn, "cached_picks", "year"):
+        query += " WHERE year = ?"
+        params.append(year)
+    query += " ORDER BY fetched_at DESC LIMIT 1"
+    row = conn.execute(query, params).fetchone()
     if row:
         return json.loads(row["data_json"])
     return None
+
+
+def get_pick_sources(conn, year=None):
+    """Get the latest cached pick percentages for each source."""
+    has_year = _table_has_column(conn, "cached_picks", "year")
+    if year is not None and has_year:
+        rows = conn.execute(
+            """
+            SELECT source, data_json, year, fetched_at
+            FROM cached_picks
+            WHERE year = ?
+              AND id IN (
+                  SELECT MAX(id)
+                  FROM cached_picks
+                  WHERE year = ?
+                  GROUP BY source
+              )
+            ORDER BY fetched_at DESC
+            """,
+            (year, year),
+        ).fetchall()
+    else:
+        select_year = ", year" if has_year else ""
+        rows = conn.execute(
+            f"""
+            SELECT source, data_json{select_year}, fetched_at
+            FROM cached_picks
+            WHERE id IN (
+                SELECT MAX(id)
+                FROM cached_picks
+                GROUP BY source
+            )
+            ORDER BY fetched_at DESC
+            """
+        ).fetchall()
+
+    return {
+        row["source"]: json.loads(row["data_json"])
+        for row in rows
+    }
 
 
 def get_latest_bracket(conn):
@@ -92,6 +137,20 @@ def get_latest_bracket(conn):
     if row:
         return json.loads(row["data_json"])
     return None
+
+
+def get_latest_bracket_record(conn):
+    """Get the most recent cached bracket row with parsed JSON."""
+    row = conn.execute(
+        "SELECT year, data_json, fetched_at FROM cached_bracket ORDER BY fetched_at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "year": row["year"],
+        "data": json.loads(row["data_json"]),
+        "fetched_at": row["fetched_at"],
+    }
 
 
 def get_job(conn, job_id):
@@ -116,3 +175,16 @@ def get_team_list(conn):
     if ratings:
         return sorted(ratings.keys())
     return []
+
+
+def _table_has_column(conn, table_name, column_name):
+    """Check whether a SQLite table already has a column."""
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(row["name"] == column_name for row in rows)
+
+
+def _ensure_column(conn, table_name, column_name, column_def):
+    """Add a column if it does not already exist."""
+    if _table_has_column(conn, table_name, column_name):
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
