@@ -65,6 +65,38 @@ def get_pick_pct(pick_pcts: dict[str, dict[int, float]],
     return default
 
 
+def get_round_pick_pct(
+    pick_pcts: dict[str, dict[int, float]],
+    team_name: str,
+    seed: int,
+    round_reaching: int,
+) -> float:
+    """Get a team's public pick rate for reaching a given round."""
+    return get_pick_pct(
+        pick_pcts,
+        team_name,
+        round_reaching,
+        default_pick_pct(seed, round_reaching),
+    )
+
+
+def get_matchup_pick_prob(
+    pick_pcts: dict[str, dict[int, float]],
+    team_a_name: str,
+    team_a_seed: int,
+    team_b_name: str,
+    team_b_seed: int,
+    round_reaching: int,
+) -> float:
+    """Estimate public pick probability for team A in a specific matchup."""
+    pct_a = get_round_pick_pct(pick_pcts, team_a_name, team_a_seed, round_reaching)
+    pct_b = get_round_pick_pct(pick_pcts, team_b_name, team_b_seed, round_reaching)
+    total = pct_a + pct_b
+    if total <= 0:
+        return 0.5
+    return pct_a / total
+
+
 def build_consensus_pick_pcts(
     picks_by_source: dict[str, dict[str, dict[int, float]]] | None,
     source_weights: dict[str, float] | None = None,

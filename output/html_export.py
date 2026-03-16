@@ -8,7 +8,7 @@ two on the right, converging to Final Four in the center.
 import os
 from models.bracket import Bracket
 from models.team import Team
-from optimizer.pick_utils import default_pick_pct, get_pick_pct
+from optimizer.pick_utils import get_matchup_pick_prob, get_round_pick_pct
 
 
 def export_bracket_html(bracket: Bracket, filepath: str,
@@ -41,8 +41,22 @@ def export_bracket_html(bracket: Bracket, filepath: str,
     print(f"Exported HTML bracket to {filepath}")
 
 
+def _conditional_win_prob(team: Team, round_num: int,
+                          reach_probs: dict[str, dict[int, float]] | None) -> float:
+    """Estimate P(team wins this game | team reached this game)."""
+    if not reach_probs:
+        return 0.0
+
+    rounds = reach_probs.get(team.name, {})
+    p_current = rounds.get(round_num, 1.0 if round_num == 1 else 0.0)
+    p_next = rounds.get(round_num + 1, 0.0)
+    if p_current <= 0:
+        return 0.0
+    return max(0.0, min(1.0, p_next / p_current))
+
+
 def _team_cell(team: Team | None, is_winner: bool = False,
-               reach_probs=None, pick_pcts=None, round_num=None) -> dict:
+               reach_probs=None, pick_pcts=None, round_num=None, opponent: Team | None = None) -> dict:
     """Build a dict describing one team cell."""
     if team is None:
         return {"name": "", "seed": "", "classes": "empty", "tooltip": ""}
@@ -57,8 +71,23 @@ def _team_cell(team: Team | None, is_winner: bool = False,
         tooltip_parts.append(f"P(reach): {p:.1%}")
     if pick_pcts:
         pick_round = round_num or 2
-        pp = get_pick_pct(pick_pcts, team.name, pick_round, default_pick_pct(team.seed, pick_round))
-        tooltip_parts.append(f"Public: {pp:.1%}")
+        pp = get_round_pick_pct(pick_pcts, team.name, team.seed, pick_round)
+        tooltip_parts.append(f"Public reach: {pp:.1%}")
+        if round_num and opponent is not None:
+            public_game = get_matchup_pick_prob(
+                pick_pcts, team.name, team.seed, opponent.name, opponent.seed, round_num
+            )
+            tooltip_parts.append(f"Public win: {public_game:.1%}")
+    if reach_probs and round_num and opponent is not None:
+        model_game = _conditional_win_prob(team, round_num - 1, reach_probs)
+        tooltip_parts.append(f"P(win game): {model_game:.1%}")
+        public_game = None
+        if pick_pcts:
+            public_game = get_matchup_pick_prob(
+                pick_pcts, team.name, team.seed, opponent.name, opponent.seed, round_num
+            )
+        if public_game and public_game > 0:
+            tooltip_parts.append(f"Game leverage: {model_game / public_game:.2f}x")
 
     return {
         "name": team.name,
@@ -81,10 +110,11 @@ def _region_data(bracket, region_idx, reach_probs, pick_pcts):
         left = bracket.slots[base + 2 * i]
         right = bracket.slots[base + 2 * i + 1]
         winner = bracket.slots[slot]
+        opponent = right if winner == left else left
         r1.append({
             "top": _team_cell(left),
             "bot": _team_cell(right),
-            "winner": _team_cell(winner, True, reach_probs, pick_pcts, 2),
+            "winner": _team_cell(winner, True, reach_probs, pick_pcts, 2, opponent),
         })
 
     # Round 2: 4 matchups
@@ -93,7 +123,10 @@ def _region_data(bracket, region_idx, reach_probs, pick_pcts):
     for i in range(4):
         slot = r2_base + i
         winner = bracket.slots[slot]
-        r2.append({"winner": _team_cell(winner, True, reach_probs, pick_pcts, 3)})
+        left = bracket.slots[slot * 2]
+        right = bracket.slots[slot * 2 + 1]
+        opponent = right if winner == left else left
+        r2.append({"winner": _team_cell(winner, True, reach_probs, pick_pcts, 3, opponent)})
 
     # Sweet 16: 2 matchups
     r3 = []
@@ -101,12 +134,18 @@ def _region_data(bracket, region_idx, reach_probs, pick_pcts):
     for i in range(2):
         slot = s16_base + i
         winner = bracket.slots[slot]
-        r3.append({"winner": _team_cell(winner, True, reach_probs, pick_pcts, 4)})
+        left = bracket.slots[slot * 2]
+        right = bracket.slots[slot * 2 + 1]
+        opponent = right if winner == left else left
+        r3.append({"winner": _team_cell(winner, True, reach_probs, pick_pcts, 4, opponent)})
 
     # Elite 8: 1 matchup (regional final)
     e8_slot = 4 + region_idx
     e8_winner = bracket.slots[e8_slot]
-    r4 = {"winner": _team_cell(e8_winner, True, reach_probs, pick_pcts, 5)}
+    left = bracket.slots[e8_slot * 2]
+    right = bracket.slots[e8_slot * 2 + 1]
+    opponent = right if e8_winner == left else left
+    r4 = {"winner": _team_cell(e8_winner, True, reach_probs, pick_pcts, 5, opponent)}
 
     return {
         "name": region_name,
@@ -122,15 +161,24 @@ def _final_four_data(bracket, reach_probs, pick_pcts):
     sf1 = bracket.slots[2]
     sf2 = bracket.slots[3]
     champ = bracket.slots[1]
+    sf1_opp = bracket.slots[5] if sf1 == bracket.slots[4] else bracket.slots[4]
+    sf2_opp = bracket.slots[7] if sf2 == bracket.slots[6] else bracket.slots[6]
+    champ_opp = bracket.slots[3] if champ == bracket.slots[2] else bracket.slots[2]
 
     # F4 teams (the 4 regional winners)
-    f4 = [bracket.slots[4 + i] for i in range(4)]
+    f4 = []
+    for slot in range(4, 8):
+        team = bracket.slots[slot]
+        left = bracket.slots[slot * 2]
+        right = bracket.slots[slot * 2 + 1]
+        opponent = right if team == left else left
+        f4.append(_team_cell(team, True, reach_probs, pick_pcts, 5, opponent))
 
     return {
-        "sf1_winner": _team_cell(sf1, True, reach_probs, pick_pcts, 6),
-        "sf2_winner": _team_cell(sf2, True, reach_probs, pick_pcts, 6),
-        "champion": _team_cell(champ, True, reach_probs, pick_pcts, 7),
-        "f4_teams": [_team_cell(t, True, reach_probs, pick_pcts, 5) for t in f4],
+        "sf1_winner": _team_cell(sf1, True, reach_probs, pick_pcts, 6, sf1_opp),
+        "sf2_winner": _team_cell(sf2, True, reach_probs, pick_pcts, 6, sf2_opp),
+        "champion": _team_cell(champ, True, reach_probs, pick_pcts, 7, champ_opp),
+        "f4_teams": f4,
     }
 
 

@@ -9,6 +9,7 @@ not just maximizing expected points.
 """
 
 from itertools import product
+import math
 
 import numpy as np
 from tqdm import tqdm
@@ -16,7 +17,7 @@ from tqdm import tqdm
 import config
 from models.bracket import Bracket
 from models.team import Team
-from optimizer.pick_utils import default_pick_pct, get_pick_pct
+from optimizer.pick_utils import get_matchup_pick_prob, get_round_pick_pct
 from optimizer.scorer import score_bracket, compute_game_points
 from optimizer.simulator import simulate_once_flat
 from optimizer.pool_model import generate_opponent_bracket
@@ -202,7 +203,7 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
                             reach_probs, pick_pcts, pool_size, accuracy_weight,
                             round_points=None,
                             upset_mode=None, upset_values=None):
-    """Quick scoring of a late-round configuration using EMV formula.
+    """Quick scoring of a late-round configuration using leverage-aware value.
 
     No simulation needed — uses pre-computed reach probabilities.
     Now accounts for upset bonuses in semifinal and championship matchups.
@@ -210,47 +211,59 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
     rp = round_points or config.ROUND_POINTS
     total_emv = 0.0
 
-    # Score Final Four picks (round 4 = Elite Eight, scoring for reaching F4)
-    # No upset bonus here since we don't know the exact E8 matchup opponent
+    # Score Final Four picks by the unconditional chance of reaching the F4.
+    # We do not know the exact Elite Eight opponent yet at this stage.
     for team in f4_teams:
-        p_reach = _conditional_advance_prob(team, 4, reach_probs)
-        pick_frac = get_pick_pct(pick_pcts, team.name, 5, default_pick_pct(team.seed, 5))
-        emv = _compute_emv(p_reach, pick_frac, rp[4], pool_size, accuracy_weight)
+        p_reach = reach_probs.get(team.name, {}).get(5, 0.0)
+        pick_frac = get_round_pick_pct(pick_pcts, team.name, team.seed, 5)
+        emv = _compute_pick_value(p_reach, pick_frac, rp[4], pool_size, accuracy_weight)
         total_emv += emv
 
     # Score semifinal winners (round 5 = Final Four)
     for winner, loser in [(semi1_winner, semi1_loser), (semi2_winner, semi2_loser)]:
         p_reach = _conditional_advance_prob(winner, 5, reach_probs)
-        pick_frac = get_pick_pct(pick_pcts, winner.name, 6, default_pick_pct(winner.seed, 6))
+        pick_frac = get_matchup_pick_prob(
+            pick_pcts, winner.name, winner.seed, loser.name, loser.seed, 6
+        )
         pts = compute_game_points(winner, loser, 5, rp, upset_mode, upset_values)
-        emv = _compute_emv(p_reach, pick_frac, pts, pool_size, accuracy_weight)
+        emv = _compute_pick_value(p_reach, pick_frac, pts, pool_size, accuracy_weight)
         total_emv += emv
 
     # Score champion (round 6 = Championship)
     p_champ = _conditional_advance_prob(champion, 6, reach_probs)
-    champ_pick = get_pick_pct(pick_pcts, champion.name, 7, default_pick_pct(champion.seed, 7))
+    champ_pick = get_matchup_pick_prob(
+        pick_pcts, champion.name, champion.seed, champ_loser.name, champ_loser.seed, 7
+    )
     champ_pts = compute_game_points(champion, champ_loser, 6, rp, upset_mode, upset_values)
-    emv = _compute_emv(p_champ, champ_pick, champ_pts, pool_size, accuracy_weight)
+    emv = _compute_pick_value(p_champ, champ_pick, champ_pts, pool_size, accuracy_weight)
     total_emv += emv
 
     return total_emv
 
 
-def _compute_emv(p_reach: float, pick_frac: float, points: float,
-                 pool_size: int, accuracy_weight: float) -> float:
-    """Compute Expected Marginal Value for a pick.
+def _compute_pick_value(model_prob: float, public_prob: float, points: float,
+                        pool_size: int, accuracy_weight: float) -> float:
+    """Score a pick by blending accuracy with game-level leverage.
 
-    EMV = P(reach) * points * [alpha + (1-alpha) * (1-pick_frac)^(pool_size-1)]
-
-    The (1-pick_frac)^(pool_size-1) term is the probability that none of your
-    opponents also made this pick — i.e., it's a "unique" correct pick.
+    At ``accuracy_weight=1`` this reduces to expected points. As the slider
+    moves toward contrarian, picks get rewarded for beating the public's
+    implied probability, with a stronger effect in larger pools.
     """
-    if p_reach <= 0:
+    if model_prob <= 0:
         return 0.0
 
-    p_unique = (1 - pick_frac) ** (pool_size - 1)
-    advantage = accuracy_weight + (1 - accuracy_weight) * p_unique
-    return p_reach * points * advantage
+    if accuracy_weight >= 1.0:
+        return model_prob * points
+
+    public_prob = min(0.999, max(0.001, public_prob))
+    leverage_ratio = model_prob / public_prob
+    leverage_ratio = min(4.0, max(0.25, leverage_ratio))
+
+    contrarian_weight = max(0.0, 1.0 - accuracy_weight)
+    leverage_exponent = contrarian_weight * max(1.0, math.log(max(pool_size, 2)))
+    leverage_multiplier = leverage_ratio ** leverage_exponent
+
+    return model_prob * points * leverage_multiplier
 
 
 def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
@@ -312,7 +325,7 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
             elif b_forced:
                 result.set_winner(game_slot, team_b)
             else:
-                # Free pick: use EMV with upset-aware points
+                # Free pick: blend model accuracy with public leverage.
                 pts_a = compute_game_points(
                     team_a, team_b, round_num, rp, upset_mode, upset_values
                 )
@@ -320,15 +333,29 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
                     team_b, team_a, round_num, rp, upset_mode, upset_values
                 )
 
-                emv_a = _compute_emv(
+                emv_a = _compute_pick_value(
                     _conditional_advance_prob(team_a, round_num, reach_probs),
-                    get_pick_pct(pick_pcts, team_a.name, round_num + 1, default_pick_pct(team_a.seed, round_num + 1)),
+                    get_matchup_pick_prob(
+                        pick_pcts,
+                        team_a.name,
+                        team_a.seed,
+                        team_b.name,
+                        team_b.seed,
+                        round_num + 1,
+                    ),
                     pts_a,
                     pool_size, accuracy_weight
                 )
-                emv_b = _compute_emv(
+                emv_b = _compute_pick_value(
                     _conditional_advance_prob(team_b, round_num, reach_probs),
-                    get_pick_pct(pick_pcts, team_b.name, round_num + 1, default_pick_pct(team_b.seed, round_num + 1)),
+                    get_matchup_pick_prob(
+                        pick_pcts,
+                        team_b.name,
+                        team_b.seed,
+                        team_a.name,
+                        team_a.seed,
+                        round_num + 1,
+                    ),
                     pts_b,
                     pool_size, accuracy_weight
                 )
