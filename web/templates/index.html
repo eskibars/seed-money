@@ -39,6 +39,18 @@
         </div>
 
         <div class="form-group">
+            <label for="simulation_source">Simulation Model</label>
+            <select id="simulation_source" name="simulation_source">
+                {% for source, meta in simulation_sources.items() %}
+                <option value="{{ source }}" {% if source == default_simulation_source %}selected{% endif %}>
+                    {{ meta["label"] }}
+                </option>
+                {% endfor %}
+            </select>
+            <span class="hint">Used for p(reach); public pick data is separate</span>
+        </div>
+
+        <div class="form-group">
             <label for="force_champion">Force Champion (optional)</label>
             <input type="text" id="force_champion" name="force_champion"
                    list="team-list" placeholder="e.g. Duke" autocomplete="off">

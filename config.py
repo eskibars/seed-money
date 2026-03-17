@@ -18,6 +18,35 @@ DEFAULT_POOL_SIZE = 7
 # Optimizer settings
 DEFAULT_SIMULATIONS = 10_000
 DEFAULT_ACCURACY_WEIGHT = 0.75  # 0=full contrarian, 1=full accuracy
+DEFAULT_SIMULATION_SOURCE = "torvik"
+
+RATING_SOURCES = {
+    "torvik": {
+        "label": "Bart Torvik",
+        "web": True,
+        "refresh_default": True,
+    },
+    "kenpom": {
+        "label": "KenPom",
+        "web": True,
+        "refresh_default": False,
+    },
+    "espn": {
+        "label": "ESPN BPI",
+        "web": False,
+        "refresh_default": False,
+    },
+    "manual": {
+        "label": "Manual CSV",
+        "web": False,
+        "refresh_default": False,
+    },
+}
+DEFAULT_REFRESH_RATING_SOURCES = tuple(
+    source
+    for source, meta in RATING_SOURCES.items()
+    if meta.get("refresh_default")
+)
 
 # Scoring presets for common pool formats
 SCORING_PRESETS = {

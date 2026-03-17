@@ -1,5 +1,6 @@
 """Data refresh - fetch latest ratings, picks, and bracket data."""
 
+import config
 import json
 import os
 import sys
@@ -15,22 +16,9 @@ from web.database import get_latest_ratings, get_pick_sources
 def refresh_ratings(conn, source="torvik", year=2026):
     """Fetch latest team ratings and store in DB."""
     try:
-        if source == "torvik":
-            from ingestion.torvik import fetch_torvik_ratings, parse_torvik_ratings
-            df = fetch_torvik_ratings(year=year, save=False)
-            ratings = parse_torvik_ratings(df)
-        elif source == "espn":
-            from ingestion.espn_bpi import fetch_espn_bpi, bpi_to_rating
-            raw = fetch_espn_bpi()
-            ratings = {}
-            for name, data in raw.items():
-                ratings[name] = {
-                    "rating": bpi_to_rating(data["bpi"]),
-                    "adj_offense": 100.0,
-                    "adj_defense": 100.0,
-                }
-        else:
-            raise ValueError(f"Unknown ratings source: {source}")
+        from ingestion.ratings_sources import fetch_ratings_from_source
+
+        ratings = fetch_ratings_from_source(source, year=year, save=False)
 
         conn.execute(
             "INSERT INTO cached_ratings (source, year, data_json) VALUES (?, ?, ?)",
@@ -178,15 +166,29 @@ def refresh_bracket(conn,
         raise
 
 
-def refresh_all(conn, year=2026, bracket_game_key=None):
+def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None):
     """Refresh all available data sources."""
     results = {}
 
-    try:
-        n = refresh_ratings(conn, "torvik", year)
-        results["ratings"] = f"OK ({n} teams)"
-    except Exception as e:
-        results["ratings"] = f"Error: {e}"
+    rating_sources = ratings_sources or config.DEFAULT_REFRESH_RATING_SOURCES
+    rating_statuses = []
+    rating_errors = []
+    for source in rating_sources:
+        try:
+            n = refresh_ratings(conn, source, year)
+            rating_statuses.append(f"{source}={n} teams")
+        except Exception as e:
+            rating_errors.append(f"{source}={e}")
+
+    if rating_statuses:
+        rating_summary = ", ".join(rating_statuses)
+        if rating_errors:
+            rating_summary += f"; errors: {'; '.join(rating_errors)}"
+        results["ratings"] = f"OK ({rating_summary})"
+    elif rating_errors:
+        results["ratings"] = f"Error: {'; '.join(rating_errors)}"
+    else:
+        results["ratings"] = "No ratings source requested"
 
     pick_statuses = []
     pick_errors = []

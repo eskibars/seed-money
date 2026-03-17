@@ -65,11 +65,24 @@ def init_db(db_path=None):
     conn.close()
 
 
-def get_latest_ratings(conn):
-    """Get the most recent cached ratings."""
-    row = conn.execute(
-        "SELECT data_json FROM cached_ratings ORDER BY fetched_at DESC LIMIT 1"
-    ).fetchone()
+def get_latest_ratings(conn, source=None, year=None):
+    """Get the most recent cached ratings, optionally filtered by source/year."""
+    query = "SELECT data_json FROM cached_ratings"
+    clauses = []
+    params = []
+
+    if source:
+        clauses.append("source = ?")
+        params.append(source)
+    if year is not None:
+        clauses.append("year = ?")
+        params.append(year)
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+
+    query += " ORDER BY fetched_at DESC LIMIT 1"
+    row = conn.execute(query, params).fetchone()
     if row:
         return json.loads(row["data_json"])
     return None
@@ -169,9 +182,9 @@ def get_queue_position(conn, job_id):
     return row["pos"] if row else 0
 
 
-def get_team_list(conn):
+def get_team_list(conn, source=None, year=None):
     """Get list of team names from cached ratings (for autocomplete)."""
-    ratings = get_latest_ratings(conn)
+    ratings = get_latest_ratings(conn, source=source, year=year)
     if ratings:
         return sorted(ratings.keys())
     return []

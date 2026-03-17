@@ -270,13 +270,9 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
                           reach_probs, pick_pcts, pool_size, accuracy_weight,
                           round_points=None,
                           upset_mode=None, upset_values=None):
-    """Fill the bracket working forward from round 1, with late-round picks as constraints.
-
-    1. Determine which teams are "forced" (must win every game on their path)
-    2. Fill round by round from R64 to Championship
-    3. For forced games, pick the forced team; for free games, pick by EMV
-    """
+    """Fill each region subtree optimally, conditioned on the chosen F4 teams."""
     rp = round_points or config.ROUND_POINTS
+
     # Set the late-round results
     result.set_winner(1, champion)
     result.set_winner(2, semi_winners[0])
@@ -284,85 +280,90 @@ def _fill_bracket_forward(result, champion, f4_teams, semi_winners,
     for i, team in enumerate(f4_teams):
         result.set_winner(4 + i, team)
 
-    # Build set of forced teams and their required game slots
-    forced_teams = set()
-    forced_teams.add(champion)
-    for t in f4_teams:
-        forced_teams.add(t)
-
-    # Map each forced team to the set of game slots they must win
-    forced_slots: dict[str, set[int]] = {}
-    for team in forced_teams:
-        starting = result.get_starting_slot(team)
-        if starting is None:
-            continue
-        path = result.get_path_to_championship(starting)
-        forced_slots[team.name] = set(path)
-
-    # Fill forward: round 1 (slot 32-63), round 2 (16-31), round 3 (8-15)
-    # Rounds 4-6 are already filled by the late-round picks
-    for round_num in range(1, 4):
-        for game_slot in result.get_all_game_slots_for_round(round_num):
-            left_slot, right_slot = result.get_matchup(game_slot)
-            team_a = result.slots[left_slot]
-            team_b = result.slots[right_slot]
-
-            if team_a is None and team_b is None:
-                continue
-            if team_a is None:
-                result.set_winner(game_slot, team_b)
-                continue
-            if team_b is None:
-                result.set_winner(game_slot, team_a)
-                continue
-
-            # Check if either team is forced to win this game
-            a_forced = game_slot in forced_slots.get(team_a.name, set())
-            b_forced = game_slot in forced_slots.get(team_b.name, set())
-
-            if a_forced:
-                result.set_winner(game_slot, team_a)
-            elif b_forced:
-                result.set_winner(game_slot, team_b)
-            else:
-                # Free pick: blend model accuracy with public leverage.
-                pts_a = compute_game_points(
-                    team_a, team_b, round_num, rp, upset_mode, upset_values
-                )
-                pts_b = compute_game_points(
-                    team_b, team_a, round_num, rp, upset_mode, upset_values
-                )
-
-                emv_a = _compute_pick_value(
-                    _conditional_advance_prob(team_a, round_num, reach_probs),
-                    get_matchup_pick_prob(
-                        pick_pcts,
-                        team_a.name,
-                        team_a.seed,
-                        team_b.name,
-                        team_b.seed,
-                        round_num + 1,
-                    ),
-                    pts_a,
-                    pool_size, accuracy_weight
-                )
-                emv_b = _compute_pick_value(
-                    _conditional_advance_prob(team_b, round_num, reach_probs),
-                    get_matchup_pick_prob(
-                        pick_pcts,
-                        team_b.name,
-                        team_b.seed,
-                        team_a.name,
-                        team_a.seed,
-                        round_num + 1,
-                    ),
-                    pts_b,
-                    pool_size, accuracy_weight
-                )
-
-                result.set_winner(game_slot, team_a if emv_a >= emv_b else team_b)
+    # Optimize each regional subtree jointly so coordinated upset paths can win.
+    for region_idx, forced_team in enumerate(f4_teams):
+        root_slot = 4 + region_idx
+        plans = _optimize_region_subtree(
+            result,
+            root_slot,
+            reach_probs,
+            pick_pcts,
+            pool_size,
+            accuracy_weight,
+            rp,
+            upset_mode,
+            upset_values,
+        )
+        chosen = plans.get(forced_team)
+        if chosen is None:
+            raise RuntimeError(f"Unable to build a bracket path for forced team {forced_team.name}")
+        _, picks = chosen
+        for slot, winner in picks.items():
+            result.set_winner(slot, winner)
 
     return result
+
+
+def _optimize_region_subtree(bracket: Bracket,
+                             game_slot: int,
+                             reach_probs: dict[str, dict[int, float]],
+                             pick_pcts: dict[str, dict[int, float]],
+                             pool_size: int,
+                             accuracy_weight: float,
+                             round_points: dict[int, int],
+                             upset_mode: str | None,
+                             upset_values: dict[int, float] | None) -> dict[Team, tuple[float, dict[int, Team]]]:
+    """Return the best subtree plan for each possible winner at a game slot."""
+    if game_slot >= 64:
+        team = bracket.slots[game_slot]
+        return {team: (0.0, {})} if team is not None else {}
+
+    left_slot, right_slot = bracket.get_matchup(game_slot)
+    left_plans = _optimize_region_subtree(
+        bracket, left_slot, reach_probs, pick_pcts, pool_size, accuracy_weight,
+        round_points, upset_mode, upset_values
+    )
+    right_plans = _optimize_region_subtree(
+        bracket, right_slot, reach_probs, pick_pcts, pool_size, accuracy_weight,
+        round_points, upset_mode, upset_values
+    )
+
+    round_num = bracket.get_round(game_slot)
+    plans: dict[Team, tuple[float, dict[int, Team]]] = {}
+
+    for team_a, (score_a, picks_a) in left_plans.items():
+        for team_b, (score_b, picks_b) in right_plans.items():
+            if team_a is None or team_b is None:
+                continue
+
+            shared_picks = dict(picks_a)
+            shared_picks.update(picks_b)
+
+            for winner, loser in ((team_a, team_b), (team_b, team_a)):
+                pick_value = _compute_pick_value(
+                    _conditional_advance_prob(winner, round_num, reach_probs),
+                    get_matchup_pick_prob(
+                        pick_pcts,
+                        winner.name,
+                        winner.seed,
+                        loser.name,
+                        loser.seed,
+                        round_num + 1,
+                    ),
+                    compute_game_points(winner, loser, round_num, round_points, upset_mode, upset_values),
+                    pool_size,
+                    accuracy_weight,
+                )
+                total_score = score_a + score_b + pick_value
+                existing = plans.get(winner)
+                if existing is not None and existing[0] >= total_score:
+                    continue
+
+                picks = dict(shared_picks)
+                picks[game_slot] = winner
+                plans[winner] = (total_score, picks)
+
+    return plans
 
 
 def _validate(picks, bracket, pick_pcts, pool_size, n_sims, rng,

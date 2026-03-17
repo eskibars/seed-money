@@ -11,6 +11,7 @@ import uuid
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import config
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, send_from_directory
 
 from web.database import init_db, get_db, get_job, get_queue_position, get_team_list
@@ -38,11 +39,29 @@ def create_app():
         conn = get_db()
         teams = get_team_list(conn)
         conn.close()
-        return render_template("index.html", teams=teams)
+        simulation_sources = {
+            source: meta
+            for source, meta in config.RATING_SOURCES.items()
+            if meta.get("web")
+        }
+        return render_template(
+            "index.html",
+            teams=teams,
+            simulation_sources=simulation_sources,
+            default_simulation_source=config.DEFAULT_SIMULATION_SOURCE,
+        )
 
     @app.route("/optimize", methods=["POST"])
     def optimize():
         job_id = str(uuid.uuid4())
+        allowed_simulation_sources = {
+            source
+            for source, meta in config.RATING_SOURCES.items()
+            if meta.get("web")
+        }
+        simulation_source = request.form.get("simulation_source", config.DEFAULT_SIMULATION_SOURCE).strip().lower()
+        if simulation_source not in allowed_simulation_sources:
+            simulation_source = config.DEFAULT_SIMULATION_SOURCE
 
         # Parse form
         job_config = {
@@ -51,6 +70,7 @@ def create_app():
             "accuracy_weight": request.form.get("accuracy_weight", "0.75"),
             "sims": request.form.get("sims", "10000"),
             "force_champion": request.form.get("force_champion", "").strip(),
+            "simulation_source": simulation_source,
         }
 
         # Custom scoring
@@ -165,8 +185,23 @@ def create_app():
         except ValueError:
             return "Invalid game_key", 400
 
+        ratings_source_param = (
+            request.args.get("ratings_sources", "").strip()
+            or request.args.get("ratings_source", "").strip()
+            or request.args.get("rating_source", "").strip()
+        )
+        if ratings_source_param:
+            ratings_sources = [part.strip().lower() for part in ratings_source_param.split(",") if part.strip()]
+        else:
+            ratings_sources = None
+
         conn = get_db()
-        results = refresh_all(conn, year=year, bracket_game_key=bracket_game_key)
+        results = refresh_all(
+            conn,
+            year=year,
+            bracket_game_key=bracket_game_key,
+            ratings_sources=ratings_sources,
+        )
         conn.close()
         return jsonify(results)
 

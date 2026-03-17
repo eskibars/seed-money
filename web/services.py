@@ -102,14 +102,22 @@ def run_optimization(job_id, job_config, conn):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Load data from DB
-    ratings = get_latest_ratings(conn)
-    if not ratings:
-        raise RuntimeError("No ratings data available. Run data refresh first.")
-
     bracket_record = get_latest_bracket_record(conn)
     if not bracket_record:
         raise RuntimeError("No bracket data available. Upload a bracket first.")
     bracket_data = bracket_record["data"]
+    bracket_year = bracket_record["year"]
+
+    simulation_source = job_config.get("simulation_source", config.DEFAULT_SIMULATION_SOURCE)
+    ratings = get_latest_ratings(conn, source=simulation_source, year=bracket_year)
+    if not ratings:
+        ratings = get_latest_ratings(conn, source=simulation_source)
+    if not ratings:
+        source_label = config.RATING_SOURCES.get(simulation_source, {}).get("label", simulation_source)
+        raise RuntimeError(
+            f"No {source_label} ratings available for simulation. "
+            f"Run /admin/refresh with ratings_source={simulation_source} first."
+        )
 
     pick_sources = get_pick_sources(conn, year=bracket_record["year"])
     pick_pcts = build_consensus_pick_pcts(pick_sources)

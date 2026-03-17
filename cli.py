@@ -1,7 +1,7 @@
 """March Madness Bracket Optimizer - CLI entry point.
 
 Usage:
-    python cli.py fetch-ratings [--source torvik|espn] [--year 2026]
+    python cli.py fetch-ratings [--source torvik|kenpom|espn] [--year 2026]
     python cli.py load-bracket [--interactive | --file path.json]
     python cli.py fetch-picks [--source espn|yahoo | --manual path.csv]
     python cli.py simulate [--sims 10000]
@@ -48,25 +48,12 @@ def cmd_fetch_ratings(args):
     """Fetch team power ratings."""
     state = load_state()
 
-    if args.source == "torvik":
-        from ingestion.torvik import fetch_torvik_ratings, parse_torvik_ratings
-        df = fetch_torvik_ratings(year=args.year)
-        ratings = parse_torvik_ratings(df)
-    elif args.source == "espn":
-        from ingestion.espn_bpi import fetch_espn_bpi, bpi_to_rating
-        raw = fetch_espn_bpi()
-        ratings = {}
-        for name, data in raw.items():
-            ratings[name] = {
-                "rating": bpi_to_rating(data["bpi"]),
-                "adj_offense": 100.0,
-                "adj_defense": 100.0,
-            }
-    elif args.source == "manual":
-        from ingestion.manual_entry import load_ratings_from_csv
-        ratings = load_ratings_from_csv(args.file)
-    else:
-        print(f"Unknown source: {args.source}")
+    from ingestion.ratings_sources import fetch_ratings_from_source
+
+    try:
+        ratings = fetch_ratings_from_source(args.source, year=args.year, save=True, file=args.file)
+    except Exception as e:
+        print(f"ERROR: {e}")
         return
 
     state["ratings"] = ratings
@@ -261,7 +248,7 @@ Workflow:
 
     # fetch-ratings
     p_ratings = subparsers.add_parser("fetch-ratings", help="Fetch team power ratings")
-    p_ratings.add_argument("--source", choices=["torvik", "espn", "manual"], default="torvik")
+    p_ratings.add_argument("--source", choices=["torvik", "kenpom", "espn", "manual"], default="torvik")
     p_ratings.add_argument("--year", type=int, default=2026)
     p_ratings.add_argument("--file", help="CSV file path (for --source manual)")
 
