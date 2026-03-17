@@ -29,12 +29,12 @@ RATING_SOURCES = {
     "kenpom": {
         "label": "KenPom",
         "web": True,
-        "refresh_default": False,
+        "refresh_default": True,
     },
     "espn": {
         "label": "ESPN BPI",
         "web": False,
-        "refresh_default": False,
+        "refresh_default": True,
     },
     "manual": {
         "label": "Manual CSV",
