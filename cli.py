@@ -3,7 +3,7 @@
 Usage:
     python cli.py fetch-ratings [--source torvik|kenpom|espn] [--year 2026]
     python cli.py load-bracket [--interactive | --file path.json]
-    python cli.py fetch-picks [--source espn|yahoo | --manual path.csv]
+    python cli.py fetch-picks [--source espn|yahoo] [--year 2026] [--challenge-id 277 | --manual path.csv]
     python cli.py simulate [--sims 10000]
     python cli.py optimize [--pool-size 7] [--accuracy-weight 0.75] [--force-champion "Duke"]
     python cli.py show
@@ -97,10 +97,10 @@ def cmd_fetch_picks(args):
         pick_pcts = load_pick_pcts_from_csv(args.manual)
     elif args.source == "espn":
         from ingestion.pick_popularity import fetch_espn_picks
-        pick_pcts = fetch_espn_picks()
+        pick_pcts = fetch_espn_picks(year=args.year, challenge_id=args.challenge_id)
     elif args.source == "yahoo":
         from ingestion.pick_popularity import fetch_yahoo_picks
-        pick_pcts = fetch_yahoo_picks()
+        pick_pcts = fetch_yahoo_picks(year=args.year)
     else:
         print(f"Unknown source: {args.source}")
         return
@@ -239,7 +239,7 @@ def main():
 Workflow:
   1. python cli.py fetch-ratings                    # Download team ratings (available now)
   2. python cli.py load-bracket --file bracket.json  # Enter bracket (after Selection Sunday)
-  3. python cli.py fetch-picks --source espn         # Get pick %s (after brackets open)
+  3. python cli.py fetch-picks --source espn --year 2026  # Get pick %s (after brackets open)
   4. python cli.py optimize --pool-size 7            # Run optimizer
   5. python cli.py export --format yahoo             # Get Yahoo fill-in order
         """
@@ -260,6 +260,8 @@ Workflow:
     # fetch-picks
     p_picks = subparsers.add_parser("fetch-picks", help="Fetch public pick percentages")
     p_picks.add_argument("--source", choices=["espn", "yahoo"], default="espn")
+    p_picks.add_argument("--year", type=int, default=2026)
+    p_picks.add_argument("--challenge-id", type=int, help="Override ESPN Tournament Challenge challengeId")
     p_picks.add_argument("--manual", help="CSV file with pick percentages")
 
     # simulate

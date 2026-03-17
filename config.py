@@ -77,6 +77,13 @@ PICK_SOURCE_WEIGHTS = {
     "cbs": 0.10,
 }
 
+# ESPN Tournament Challenge public-pick ingestion.
+ESPN_PICKS_PROPOSITIONS_URL = "https://gambit-api.fantasy.espn.com/apis/v1/propositions"
+ESPN_PICKS_SCORING_PERIODS = (1, 2, 3, 4, 5, 6)
+ESPN_TOURNAMENT_CHALLENGE_IDS = {
+    2026: 277,
+}
+
 # Optional article URLs for partial pick backfills.
 # Rounds use the optimizer's "reach round N" convention:
 # 2 = win first game, 5 = reach Final Four, 7 = win championship.

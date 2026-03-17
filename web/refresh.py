@@ -40,13 +40,13 @@ def refresh_ratings(conn, source="torvik", year=2026):
         raise
 
 
-def refresh_picks(conn, source="yahoo", year=2026, game_key=None):
+def refresh_picks(conn, source="yahoo", year=2026, game_key=None, challenge_id=None):
     """Fetch latest public pick percentages and store in DB."""
     try:
         ratings = get_latest_ratings(conn) or {}
         if source == "espn":
             from ingestion.pick_popularity import fetch_espn_picks
-            pick_pcts = fetch_espn_picks(year=year, ratings=ratings)
+            pick_pcts = fetch_espn_picks(year=year, ratings=ratings, challenge_id=challenge_id)
         elif source == "yahoo":
             from ingestion.pick_popularity import fetch_yahoo_picks
             pick_pcts = fetch_yahoo_picks(year=year, game_key=game_key, ratings=ratings)
@@ -166,7 +166,7 @@ def refresh_bracket(conn,
         raise
 
 
-def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None):
+def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None, espn_challenge_id=None):
     """Refresh all available data sources."""
     results = {}
 
@@ -194,7 +194,13 @@ def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None):
     pick_errors = []
     for source in ("yahoo", "espn", "ncaa", "cbs"):
         try:
-            metadata = refresh_picks(conn, source=source, year=year, game_key=bracket_game_key)
+            metadata = refresh_picks(
+                conn,
+                source=source,
+                year=year,
+                game_key=bracket_game_key,
+                challenge_id=espn_challenge_id if source == "espn" else None,
+            )
             if metadata["count"] > 0:
                 pick_statuses.append(f"{source}={metadata['count']}")
             elif source in ("yahoo", "espn"):

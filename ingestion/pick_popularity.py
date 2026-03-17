@@ -21,7 +21,7 @@ DEFAULT_HEADERS = {
 }
 
 YAHOO_PICKS_URL = "https://tournament.fantasysports.yahoo.com/mens-basketball-bracket/pickdistribution"
-ESPN_PICKS_URLS = [
+LEGACY_ESPN_PICKS_URLS = [
     "https://fantasy.espn.com/games/tournament-challenge-bracket/en/whopickedwhom",
     "https://fantasy.espn.com/games/tournament-challenge-bracket-{year}/whopickedwhom",
     "https://fantasy.espn.com/games/tournament-challenge-bracket-{year}/popular",
@@ -29,14 +29,59 @@ ESPN_PICKS_URLS = [
 
 def fetch_espn_picks(year: int = 2026,
                      save: bool = True,
-                     ratings: dict[str, dict] | None = None) -> dict[str, dict[int, float]]:
-    """Fetch ESPN public pick percentages from known Tournament Challenge pages."""
-    resolver = _build_name_resolver(ratings or {})
+                     ratings: dict[str, dict] | None = None,
+                     challenge_id: int | None = None) -> dict[str, dict[int, float]]:
+    """Fetch ESPN public pick percentages from the current JSON API."""
+    ratings = ratings or {}
+    resolver = _build_name_resolver(ratings)
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
 
-    last_error: Exception | None = None
-    for url_template in ESPN_PICKS_URLS:
+    partial_pick_sets = []
+    raw_payloads: dict[str, list[dict]] = {}
+    resolved_challenge_id = _resolve_espn_challenge_id(year, challenge_id)
+    api_error: Exception | None = None
+
+    if resolved_challenge_id is None:
+        print(
+            f"Warning: No ESPN Tournament Challenge challengeId configured for {year}; "
+            "trying legacy HTML fallback."
+        )
+    else:
+        for scoring_period_id in config.ESPN_PICKS_SCORING_PERIODS:
+            try:
+                response = session.get(
+                    config.ESPN_PICKS_PROPOSITIONS_URL,
+                    params={
+                        "challengeId": resolved_challenge_id,
+                        "scoringPeriodId": scoring_period_id,
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                raw_payloads[str(scoring_period_id)] = payload
+
+                round_picks = _parse_espn_propositions(
+                    payload,
+                    resolver=resolver,
+                    ratings=ratings,
+                    round_reaching=scoring_period_id + 1,
+                )
+                if round_picks:
+                    partial_pick_sets.append(round_picks)
+            except (requests.RequestException, ValueError) as exc:
+                api_error = exc
+
+        if save and raw_payloads:
+            _save_json(f"espn_picks_{year}.json", raw_payloads)
+
+        picks = merge_pick_pcts(partial_pick_sets)
+        if picks:
+            return picks
+
+    legacy_error: Exception | None = None
+    for url_template in LEGACY_ESPN_PICKS_URLS:
         url = url_template.format(year=year)
         try:
             response = session.get(url, timeout=30)
@@ -48,10 +93,12 @@ def fetch_espn_picks(year: int = 2026,
             if picks:
                 return picks
         except requests.RequestException as exc:
-            last_error = exc
+            legacy_error = exc
 
-    if last_error is not None:
-        print(f"Warning: Could not fetch ESPN picks: {last_error}")
+    if api_error is not None:
+        print(f"Warning: Could not fetch ESPN picks from gambit API: {api_error}")
+    if legacy_error is not None:
+        print(f"Warning: Could not fetch ESPN picks from legacy pages: {legacy_error}")
     return {}
 
 
@@ -179,6 +226,29 @@ def _parse_espn_picks(html: str, resolver) -> dict[str, dict[int, float]]:
     if picks:
         return picks
     return _parse_pick_table_html(html, resolver, round_reaching=None)
+
+
+def _parse_espn_propositions(payload,
+                             resolver,
+                             ratings: dict[str, dict],
+                             round_reaching: int) -> dict[str, dict[int, float]]:
+    """Parse ESPN's current Tournament Challenge propositions API."""
+    if isinstance(payload, dict):
+        propositions = payload.get("items") or payload.get("propositions") or []
+    else:
+        propositions = payload or []
+
+    picks: dict[str, dict[int, float]] = {}
+    for proposition in propositions:
+        for outcome in proposition.get("possibleOutcomes") or []:
+            pct = _extract_espn_outcome_percentage(outcome)
+            if pct is None:
+                continue
+
+            for team_name in _resolve_espn_outcome_team_names(outcome, resolver, ratings):
+                picks.setdefault(team_name, {})[round_reaching] = pct
+
+    return picks
 
 
 def _parse_multi_round_pick_table_html(html: str, resolver) -> dict[str, dict[int, float]]:
@@ -387,6 +457,29 @@ def _extract_percentage(team_entry: dict) -> float | None:
     return None
 
 
+def _extract_espn_outcome_percentage(outcome: dict) -> float | None:
+    """Extract a pick percentage from one ESPN proposition outcome."""
+    counters = outcome.get("choiceCounters") or []
+
+    preferred_counter = None
+    for counter in counters:
+        if counter.get("percentage") is None:
+            continue
+        if int(counter.get("scoringFormatId") or 0) == 5:
+            preferred_counter = counter
+            break
+
+    if preferred_counter is None:
+        preferred_counter = next(
+            (counter for counter in counters if counter.get("percentage") is not None),
+            None,
+        )
+
+    if preferred_counter is None:
+        return None
+    return _coerce_pct(preferred_counter.get("percentage"))
+
+
 def _coerce_pct(value) -> float | None:
     """Convert a numeric percent or fraction to a 0-1 float."""
     try:
@@ -423,11 +516,7 @@ def _clean_team_name(text: str) -> str:
 
 def _build_name_resolver(ratings: dict[str, dict]):
     """Create a best-effort public-name to canonical-name resolver."""
-    aliases_path = os.path.join(os.path.dirname(__file__), "..", "data", "team_aliases.json")
-    aliases: dict[str, str] = {}
-    if os.path.exists(aliases_path):
-        with open(aliases_path, "r", encoding="utf-8") as f:
-            aliases = json.load(f)
+    aliases = _load_team_aliases()
 
     normalized_to_canonical: dict[str, str] = {}
     for canonical in ratings:
@@ -443,6 +532,150 @@ def _build_name_resolver(ratings: dict[str, dict]):
         return normalized_to_canonical.get(_normalize_text(name).lower(), name)
 
     return resolve
+
+
+def _load_team_aliases() -> dict[str, str]:
+    """Load canonical team-name aliases used across source ingestors."""
+    aliases_path = os.path.join(os.path.dirname(__file__), "..", "data", "team_aliases.json")
+    if not os.path.exists(aliases_path):
+        return {}
+    with open(aliases_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _resolve_espn_challenge_id(year: int, explicit_challenge_id: int | None) -> int | None:
+    """Resolve which ESPN Tournament Challenge challengeId to query."""
+    if explicit_challenge_id is not None:
+        return int(explicit_challenge_id)
+
+    env_specific = os.environ.get(f"SEED_MONEY_ESPN_CHALLENGE_ID_{year}", "").strip()
+    if env_specific:
+        return int(env_specific)
+
+    env_default = os.environ.get("SEED_MONEY_ESPN_CHALLENGE_ID", "").strip()
+    if env_default:
+        return int(env_default)
+
+    return config.ESPN_TOURNAMENT_CHALLENGE_IDS.get(year)
+
+
+def _resolve_espn_outcome_team_names(outcome: dict,
+                                     resolver,
+                                     ratings: dict[str, dict]) -> list[str]:
+    """Resolve an ESPN outcome to one or more canonical team names."""
+    resolved = []
+    for value in (outcome.get("name"), outcome.get("description")):
+        text = _clean_team_name(str(value or ""))
+        if not text:
+            continue
+        if "/" in text:
+            resolved.extend(_expand_slash_separated_team_names(text, resolver, ratings))
+            continue
+        resolved.append(resolver(text))
+        break
+
+    if not resolved:
+        abbrev = _clean_team_name(str(outcome.get("abbrev") or ""))
+        if "/" in abbrev:
+            resolved.extend(_expand_slash_separated_team_names(abbrev, resolver, ratings))
+        elif abbrev:
+            resolved.append(resolver(abbrev))
+
+    return _dedupe_preserve_order(name for name in resolved if name)
+
+
+def _expand_slash_separated_team_names(text: str,
+                                       resolver,
+                                       ratings: dict[str, dict]) -> list[str]:
+    """Expand a placeholder like 'UMBC/HOW' into real team names when possible."""
+    aliases = _load_team_aliases()
+    code_to_canonical: dict[str, set[str]] = {}
+
+    candidate_names = set(ratings.keys())
+    candidate_names.update(
+        canonical
+        for alias, canonical in aliases.items()
+        if not alias.startswith("_comment")
+    )
+
+    for canonical in candidate_names:
+        for code in _build_matching_codes(canonical):
+            code_to_canonical.setdefault(code, set()).add(canonical)
+
+    for alias, canonical in aliases.items():
+        if alias.startswith("_comment"):
+            continue
+        for code in _build_matching_codes(alias):
+            code_to_canonical.setdefault(code, set()).add(canonical)
+
+    resolved = []
+    for segment in re.split(r"/+", text):
+        cleaned_segment = _clean_team_name(segment)
+        if not cleaned_segment:
+            continue
+
+        direct = resolver(cleaned_segment)
+        if direct and direct != cleaned_segment:
+            resolved.append(direct)
+            continue
+
+        normalized_segment = _normalize_code(cleaned_segment)
+        exact_matches = sorted(code_to_canonical.get(normalized_segment, ()))
+        if exact_matches:
+            resolved.extend(exact_matches)
+            continue
+
+        prefix_matches = set()
+        if len(normalized_segment) >= 2:
+            for code, canonical_names in code_to_canonical.items():
+                if code.startswith(normalized_segment) or normalized_segment.startswith(code):
+                    prefix_matches.update(canonical_names)
+        if prefix_matches:
+            resolved.extend(sorted(prefix_matches))
+            continue
+
+        resolved.append(cleaned_segment)
+
+    return _dedupe_preserve_order(resolved)
+
+
+def _build_matching_codes(text: str) -> set[str]:
+    """Build short codes for matching compact ESPN placeholder segments."""
+    normalized = _normalize_code(text)
+    tokens = [
+        _normalize_code(token)
+        for token in re.split(r"[^A-Za-z0-9]+", text or "")
+        if token
+    ]
+    initials = "".join(token[:1] for token in tokens)
+    consonants = re.sub(r"[AEIOU]", "", normalized)
+
+    codes = {normalized, initials, consonants}
+    for value in (normalized, consonants):
+        if len(value) >= 2:
+            codes.add(value[:2])
+        if len(value) >= 3:
+            codes.add(value[:3])
+        if len(value) >= 4:
+            codes.add(value[:4])
+    return {code for code in codes if code}
+
+
+def _normalize_code(text: str) -> str:
+    """Normalize a compact code like 'M-OH' into 'MOH'."""
+    return re.sub(r"[^A-Za-z0-9]", "", (text or "").upper())
+
+
+def _dedupe_preserve_order(values) -> list[str]:
+    """Remove duplicates while preserving the original order."""
+    seen = set()
+    ordered = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _normalize_text(text: str) -> str:

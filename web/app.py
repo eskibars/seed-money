@@ -185,6 +185,16 @@ def create_app():
         except ValueError:
             return "Invalid game_key", 400
 
+        challenge_id_param = (
+            request.args.get("espn_challenge_id", "").strip()
+            or request.args.get("challenge_id", "").strip()
+            or request.args.get("challengeId", "").strip()
+        )
+        try:
+            espn_challenge_id = int(challenge_id_param) if challenge_id_param else None
+        except ValueError:
+            return "Invalid challenge_id", 400
+
         ratings_source_param = (
             request.args.get("ratings_sources", "").strip()
             or request.args.get("ratings_source", "").strip()
@@ -201,6 +211,7 @@ def create_app():
             year=year,
             bracket_game_key=bracket_game_key,
             ratings_sources=ratings_sources,
+            espn_challenge_id=espn_challenge_id,
         )
         conn.close()
         return jsonify(results)
