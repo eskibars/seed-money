@@ -44,9 +44,9 @@ def parse_kenpom_ratings(df: pd.DataFrame) -> dict[str, dict]:
 
     team_col = _find_col(df, ["team", "Team"])
     pyth_col = _find_col(df, ["pyth", "Pyth"])
-    adjem_col = _find_col(df, ["adjem", "AdjEM", "Adj Em"])
-    adjo_col = _find_col(df, ["adjo", "AdjO", "AdjOE", "Adj O"])
-    adjd_col = _find_col(df, ["adjd", "AdjD", "AdjDE", "Adj D"])
+    adjem_col = _find_col(df, ["adjem", "AdjEM", "Adj Em", "NetRtg", "Net Rating"])
+    adjo_col = _find_col(df, ["adjo", "AdjO", "AdjOE", "Adj O", "ORtg", "OffRtg", "Off Rating"])
+    adjd_col = _find_col(df, ["adjd", "AdjD", "AdjDE", "Adj D", "DRtg", "DefRtg", "Def Rating"])
     conf_col = _find_col(df, ["conf", "Conf", "conference", "Conference"])
 
     if not team_col:
