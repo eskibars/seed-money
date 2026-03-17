@@ -4,28 +4,38 @@ document.addEventListener("DOMContentLoaded", () => {
     // Scoring preset toggle
     const presetSelect = document.getElementById("scoring_preset");
     const customSection = document.getElementById("custom-scoring");
-
-    if (presetSelect && customSection) {
-        presetSelect.addEventListener("change", () => {
-            customSection.classList.toggle("hidden", presetSelect.value !== "custom");
-        });
-    }
-
-    // Accuracy weight slider label
+    const form = document.getElementById("optimize-form");
+    const submitBtn = document.getElementById("submit-btn");
     const slider = document.getElementById("accuracy_weight");
     const valueDisplay = document.getElementById("accuracy-value");
-
-    if (slider && valueDisplay) {
-        slider.addEventListener("input", () => {
-            valueDisplay.textContent = parseFloat(slider.value).toFixed(2);
-        });
-    }
-
-    // Upset bonus mode toggle
     const upsetMode = document.getElementById("upset_mode");
     const multFields = document.getElementById("upset-multiplier-fields");
     const fixedFields = document.getElementById("upset-fixed-fields");
 
+    function updateScoringPreset() {
+        if (presetSelect && customSection) {
+            customSection.classList.toggle("hidden", presetSelect.value !== "custom");
+        }
+    }
+
+    if (presetSelect && customSection) {
+        presetSelect.addEventListener("change", updateScoringPreset);
+        updateScoringPreset();
+    }
+
+    // Accuracy weight slider label
+    function updateAccuracyLabel() {
+        if (slider && valueDisplay) {
+            valueDisplay.textContent = parseFloat(slider.value).toFixed(2);
+        }
+    }
+
+    if (slider && valueDisplay) {
+        slider.addEventListener("input", updateAccuracyLabel);
+        updateAccuracyLabel();
+    }
+
+    // Upset bonus mode toggle
     function updateUpsetFields() {
         if (!upsetMode) return;
         const mode = upsetMode.value;
@@ -49,7 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (upsetMode) {
         upsetMode.addEventListener("change", updateUpsetFields);
-        updateUpsetFields(); // Initialize on page load
+        updateUpsetFields();
     }
 
     // Add bias row
@@ -90,14 +100,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Form submission — disable button to prevent double submit
-    const form = document.getElementById("optimize-form");
-    const submitBtn = document.getElementById("submit-btn");
+    function restoreSubmitState() {
+        if (!submitBtn) return;
+        submitBtn.disabled = false;
+        submitBtn.textContent = submitBtn.dataset.defaultLabel || "Optimize My Bracket";
+    }
 
     if (form && submitBtn) {
+        submitBtn.dataset.defaultLabel = submitBtn.textContent;
         form.addEventListener("submit", () => {
             submitBtn.disabled = true;
             submitBtn.textContent = "Submitting...";
         });
     }
+
+    // Browsers may restore this page from the back/forward cache with the
+    // disabled submit button still in place. Rehydrate the interactive state.
+    window.addEventListener("pageshow", () => {
+        updateScoringPreset();
+        updateAccuracyLabel();
+        updateUpsetFields();
+        restoreSubmitState();
+    });
 });
