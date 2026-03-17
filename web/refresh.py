@@ -9,8 +9,8 @@ import traceback
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from optimizer.pick_utils import build_consensus_pick_pcts
-from web.database import get_latest_ratings, get_pick_sources
+from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names, filter_pick_pcts_to_teams
+from web.database import get_latest_bracket_record, get_latest_ratings, get_pick_sources
 
 
 def refresh_ratings(conn, source="torvik", year=2026):
@@ -44,9 +44,16 @@ def refresh_picks(conn, source="yahoo", year=2026, game_key=None, challenge_id=N
     """Fetch latest public pick percentages and store in DB."""
     try:
         ratings = get_latest_ratings(conn) or {}
+        bracket_record = get_latest_bracket_record(conn, year=year)
+        bracket_teams = extract_bracket_team_names(bracket_record["data"]) if bracket_record else set()
         if source == "espn":
             from ingestion.pick_popularity import fetch_espn_picks
-            pick_pcts = fetch_espn_picks(year=year, ratings=ratings, challenge_id=challenge_id)
+            pick_pcts = fetch_espn_picks(
+                year=year,
+                ratings=ratings,
+                challenge_id=challenge_id,
+                bracket_teams=bracket_teams,
+            )
         elif source == "yahoo":
             from ingestion.pick_popularity import fetch_yahoo_picks
             pick_pcts = fetch_yahoo_picks(year=year, game_key=game_key, ratings=ratings)
@@ -59,6 +66,7 @@ def refresh_picks(conn, source="yahoo", year=2026, game_key=None, challenge_id=N
         else:
             raise ValueError(f"Unknown picks source: {source}")
 
+        pick_pcts = filter_pick_pcts_to_teams(pick_pcts, bracket_teams)
         metadata = {"source": source, "year": year, "count": len(pick_pcts), "configured": True}
         if not pick_pcts:
             conn.execute(
@@ -190,6 +198,18 @@ def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None, es
     else:
         results["ratings"] = "No ratings source requested"
 
+    bracket_year = year
+    try:
+        metadata = refresh_bracket(conn, year=year, source="yahoo", game_key=bracket_game_key)
+        bracket_year = int(metadata.get("year", year))
+        label = f"OK ({metadata.get('source', 'yahoo')}"
+        if metadata.get("game_key") is not None:
+            label += f" gameKey={metadata['game_key']}"
+        label += ")"
+        results["bracket"] = label
+    except Exception as e:
+        results["bracket"] = f"Error: {e}"
+
     pick_statuses = []
     pick_errors = []
     for source in ("yahoo", "espn", "ncaa", "cbs"):
@@ -197,7 +217,7 @@ def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None, es
             metadata = refresh_picks(
                 conn,
                 source=source,
-                year=year,
+                year=bracket_year,
                 game_key=bracket_game_key,
                 challenge_id=espn_challenge_id if source == "espn" else None,
             )
@@ -208,7 +228,12 @@ def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None, es
         except Exception as e:
             pick_errors.append(f"{source}={e}")
 
-    consensus_picks = build_consensus_pick_pcts(get_pick_sources(conn, year=year))
+    bracket_record = get_latest_bracket_record(conn, year=bracket_year)
+    bracket_teams = extract_bracket_team_names(bracket_record["data"]) if bracket_record else set()
+    consensus_picks = build_consensus_pick_pcts(
+        get_pick_sources(conn, year=bracket_year),
+        allowed_teams=bracket_teams,
+    )
     if consensus_picks:
         summary_parts = pick_statuses + pick_errors
         source_summary = ", ".join(summary_parts) if summary_parts else "sources refreshed"
@@ -218,15 +243,5 @@ def refresh_all(conn, year=2026, bracket_game_key=None, ratings_sources=None, es
     else:
         checked = ", ".join(pick_statuses) if pick_statuses else "no sources configured"
         results["picks"] = f"No data available ({checked})"
-
-    try:
-        metadata = refresh_bracket(conn, year=year, source="yahoo", game_key=bracket_game_key)
-        label = f"OK ({metadata.get('source', 'yahoo')}"
-        if metadata.get("game_key") is not None:
-            label += f" gameKey={metadata['game_key']}"
-        label += ")"
-        results["bracket"] = label
-    except Exception as e:
-        results["bracket"] = f"Error: {e}"
 
     return results

@@ -30,7 +30,8 @@ LEGACY_ESPN_PICKS_URLS = [
 def fetch_espn_picks(year: int = 2026,
                      save: bool = True,
                      ratings: dict[str, dict] | None = None,
-                     challenge_id: int | None = None) -> dict[str, dict[int, float]]:
+                     challenge_id: int | None = None,
+                     bracket_teams: set[str] | None = None) -> dict[str, dict[int, float]]:
     """Fetch ESPN public pick percentages from the current JSON API."""
     ratings = ratings or {}
     resolver = _build_name_resolver(ratings)
@@ -67,6 +68,7 @@ def fetch_espn_picks(year: int = 2026,
                     resolver=resolver,
                     ratings=ratings,
                     round_reaching=scoring_period_id + 1,
+                    bracket_teams=bracket_teams,
                 )
                 if round_picks:
                     partial_pick_sets.append(round_picks)
@@ -231,7 +233,8 @@ def _parse_espn_picks(html: str, resolver) -> dict[str, dict[int, float]]:
 def _parse_espn_propositions(payload,
                              resolver,
                              ratings: dict[str, dict],
-                             round_reaching: int) -> dict[str, dict[int, float]]:
+                             round_reaching: int,
+                             bracket_teams: set[str] | None = None) -> dict[str, dict[int, float]]:
     """Parse ESPN's current Tournament Challenge propositions API."""
     if isinstance(payload, dict):
         propositions = payload.get("items") or payload.get("propositions") or []
@@ -245,7 +248,12 @@ def _parse_espn_propositions(payload,
             if pct is None:
                 continue
 
-            for team_name in _resolve_espn_outcome_team_names(outcome, resolver, ratings):
+            for team_name in _resolve_espn_outcome_team_names(
+                outcome,
+                resolver,
+                ratings,
+                bracket_teams=bracket_teams,
+            ):
                 picks.setdefault(team_name, {})[round_reaching] = pct
 
     return picks
@@ -561,7 +569,8 @@ def _resolve_espn_challenge_id(year: int, explicit_challenge_id: int | None) -> 
 
 def _resolve_espn_outcome_team_names(outcome: dict,
                                      resolver,
-                                     ratings: dict[str, dict]) -> list[str]:
+                                     ratings: dict[str, dict],
+                                     bracket_teams: set[str] | None = None) -> list[str]:
     """Resolve an ESPN outcome to one or more canonical team names."""
     resolved = []
     for value in (outcome.get("name"), outcome.get("description")):
@@ -569,7 +578,14 @@ def _resolve_espn_outcome_team_names(outcome: dict,
         if not text:
             continue
         if "/" in text:
-            resolved.extend(_expand_slash_separated_team_names(text, resolver, ratings))
+            resolved.extend(
+                _expand_slash_separated_team_names(
+                    text,
+                    resolver,
+                    ratings,
+                    bracket_teams=bracket_teams,
+                )
+            )
             continue
         resolved.append(resolver(text))
         break
@@ -577,7 +593,14 @@ def _resolve_espn_outcome_team_names(outcome: dict,
     if not resolved:
         abbrev = _clean_team_name(str(outcome.get("abbrev") or ""))
         if "/" in abbrev:
-            resolved.extend(_expand_slash_separated_team_names(abbrev, resolver, ratings))
+            resolved.extend(
+                _expand_slash_separated_team_names(
+                    abbrev,
+                    resolver,
+                    ratings,
+                    bracket_teams=bracket_teams,
+                )
+            )
         elif abbrev:
             resolved.append(resolver(abbrev))
 
@@ -586,17 +609,15 @@ def _resolve_espn_outcome_team_names(outcome: dict,
 
 def _expand_slash_separated_team_names(text: str,
                                        resolver,
-                                       ratings: dict[str, dict]) -> list[str]:
+                                       ratings: dict[str, dict],
+                                       bracket_teams: set[str] | None = None) -> list[str]:
     """Expand a placeholder like 'UMBC/HOW' into real team names when possible."""
     aliases = _load_team_aliases()
     code_to_canonical: dict[str, set[str]] = {}
 
-    candidate_names = set(ratings.keys())
-    candidate_names.update(
-        canonical
-        for alias, canonical in aliases.items()
-        if not alias.startswith("_comment")
-    )
+    candidate_names = set(bracket_teams or ())
+    if not candidate_names:
+        candidate_names = set(ratings.keys())
 
     for canonical in candidate_names:
         for code in _build_matching_codes(canonical):
@@ -604,6 +625,8 @@ def _expand_slash_separated_team_names(text: str,
 
     for alias, canonical in aliases.items():
         if alias.startswith("_comment"):
+            continue
+        if candidate_names and canonical not in candidate_names:
             continue
         for code in _build_matching_codes(alias):
             code_to_canonical.setdefault(code, set()).add(canonical)
@@ -614,24 +637,17 @@ def _expand_slash_separated_team_names(text: str,
         if not cleaned_segment:
             continue
 
-        direct = resolver(cleaned_segment)
-        if direct and direct != cleaned_segment:
+        direct = resolver(cleaned_segment) or cleaned_segment
+        if candidate_names and direct not in candidate_names:
+            direct = ""
+        if direct:
             resolved.append(direct)
             continue
 
         normalized_segment = _normalize_code(cleaned_segment)
         exact_matches = sorted(code_to_canonical.get(normalized_segment, ()))
-        if exact_matches:
+        if len(exact_matches) == 1:
             resolved.extend(exact_matches)
-            continue
-
-        prefix_matches = set()
-        if len(normalized_segment) >= 2:
-            for code, canonical_names in code_to_canonical.items():
-                if code.startswith(normalized_segment) or normalized_segment.startswith(code):
-                    prefix_matches.update(canonical_names)
-        if prefix_matches:
-            resolved.extend(sorted(prefix_matches))
             continue
 
         resolved.append(cleaned_segment)

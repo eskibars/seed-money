@@ -100,6 +100,7 @@ def get_matchup_pick_prob(
 def build_consensus_pick_pcts(
     picks_by_source: dict[str, dict[str, dict[int, float]]] | None,
     source_weights: dict[str, float] | None = None,
+    allowed_teams: set[str] | None = None,
 ) -> dict[str, dict[int, float]]:
     """Blend multiple pick sources into one consensus matrix.
 
@@ -115,7 +116,7 @@ def build_consensus_pick_pcts(
         weights.update(source_weights)
 
     normalized_sources = {
-        source: normalize_pick_pcts(picks)
+        source: filter_pick_pcts_to_teams(picks, allowed_teams)
         for source, picks in picks_by_source.items()
         if picks
     }
@@ -152,6 +153,35 @@ def build_consensus_pick_pcts(
             consensus[team] = rounds
 
     return consensus
+
+
+def filter_pick_pcts_to_teams(
+    pick_pcts: dict[str, dict[int, float]] | None,
+    allowed_teams: set[str] | None,
+) -> dict[str, dict[int, float]]:
+    """Keep only pick rows that belong to the current bracket field."""
+    normalized = normalize_pick_pcts(pick_pcts)
+    if not normalized or not allowed_teams:
+        return normalized
+
+    return {
+        team: rounds
+        for team, rounds in normalized.items()
+        if team in allowed_teams
+    }
+
+
+def extract_bracket_team_names(bracket_data: dict | None) -> set[str]:
+    """Extract the 64 team names from a stored bracket JSON payload."""
+    if not bracket_data:
+        return set()
+
+    team_names = set()
+    for region in bracket_data.get("regions") or []:
+        for team_name in (region.get("teams") or {}).values():
+            if team_name:
+                team_names.add(str(team_name))
+    return team_names
 
 
 def merge_pick_pcts(

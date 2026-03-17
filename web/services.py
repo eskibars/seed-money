@@ -11,7 +11,7 @@ import config
 from ingestion.bracket_loader import load_bracket_from_dict
 from optimizer.simulator import simulate_tournament
 from optimizer.engine import optimize
-from optimizer.pick_utils import build_consensus_pick_pcts
+from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names
 from output.html_export import export_bracket_html
 from web.database import get_latest_ratings, get_latest_bracket_record, get_pick_sources
 
@@ -120,7 +120,8 @@ def run_optimization(job_id, job_config, conn):
         )
 
     pick_sources = get_pick_sources(conn, year=bracket_record["year"])
-    pick_pcts = build_consensus_pick_pcts(pick_sources)
+    bracket_teams = extract_bracket_team_names(bracket_data)
+    pick_pcts = build_consensus_pick_pcts(pick_sources, allowed_teams=bracket_teams)
 
     # Apply user biases
     biases = job_config.get("biases", [])

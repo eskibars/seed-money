@@ -142,21 +142,29 @@ def get_pick_sources(conn, year=None):
     }
 
 
-def get_latest_bracket(conn):
-    """Get the most recent cached bracket data."""
-    row = conn.execute(
-        "SELECT data_json FROM cached_bracket ORDER BY fetched_at DESC LIMIT 1"
-    ).fetchone()
+def get_latest_bracket(conn, year=None):
+    """Get the most recent cached bracket data, optionally filtered by year."""
+    query = "SELECT data_json FROM cached_bracket"
+    params = []
+    if year is not None:
+        query += " WHERE year = ?"
+        params.append(year)
+    query += " ORDER BY fetched_at DESC LIMIT 1"
+    row = conn.execute(query, params).fetchone()
     if row:
         return json.loads(row["data_json"])
     return None
 
 
-def get_latest_bracket_record(conn):
+def get_latest_bracket_record(conn, year=None):
     """Get the most recent cached bracket row with parsed JSON."""
-    row = conn.execute(
-        "SELECT year, data_json, fetched_at FROM cached_bracket ORDER BY fetched_at DESC LIMIT 1"
-    ).fetchone()
+    query = "SELECT year, data_json, fetched_at FROM cached_bracket"
+    params = []
+    if year is not None:
+        query += " WHERE year = ?"
+        params.append(year)
+    query += " ORDER BY fetched_at DESC LIMIT 1"
+    row = conn.execute(query, params).fetchone()
     if not row:
         return None
     return {
