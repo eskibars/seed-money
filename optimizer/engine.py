@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 import config
 from models.bracket import Bracket
+from models.probability import log5
 from models.team import Team
 from optimizer.pick_utils import get_matchup_pick_prob, get_round_pick_pct
 from optimizer.scorer import score_bracket, compute_game_points
@@ -129,7 +130,7 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
 
     # Pre-simulate tournaments for fast, path-aware late-round evaluation
     pre_sims = min(1000, n_sims)
-    _print(f"  Pre-simulating {pre_sims} tournaments for evaluation...")
+    _print(f"  Pre-simulating {pre_sims} tournaments for evaluation (pass 1)...")
     sim_results = [simulate_once_flat(bracket, rng) for _ in range(pre_sims)]
     slot_candidates = _build_late_round_slot_candidates(candidates_per_region)
     score_cache = _precompute_late_round_scores(
@@ -141,8 +142,7 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
 
     # Enumerate all F4 combos x semifinal winners x champion
     # Regions 0,1 feed into semifinal at slot 2; regions 2,3 feed into semifinal at slot 3
-    best_score = None
-    best_config = None
+    all_scored: list[tuple[tuple, tuple]] = []  # (score, config)
     total_combos = 0
 
     for f4 in product(*candidates_per_region):
@@ -176,11 +176,44 @@ def _optimize_late_rounds(bracket, reach_probs, pick_pcts, pool_size,
                         accuracy_weight * avg_late_score + (1 - accuracy_weight) * heuristic_score,
                         heuristic_score,
                     )
-                    if best_score is None or score > best_score:
-                        best_score = score
-                        best_config = (champ, list(f4), [semi1_winner, semi2_winner])
+                    combo = (champ, list(f4), [semi1_winner, semi2_winner])
+                    all_scored.append((score, combo))
 
     _print(f"  Evaluated {total_combos} late-round combinations")
+
+    # Two-pass refinement: re-evaluate top candidates with more simulations
+    # to reduce noise in win rate estimates from the first pass.
+    all_scored.sort(key=lambda x: x[0], reverse=True)
+    refine_n = min(50, len(all_scored))
+    refine_sims = min(5000, n_sims)
+    if refine_n > 1 and refine_sims > pre_sims:
+        _print(f"  Refining top {refine_n} candidates with {refine_sims} simulations (pass 2)...")
+        sim_results_2 = [simulate_once_flat(bracket, rng) for _ in range(refine_sims)]
+        score_cache_2 = _precompute_late_round_scores(
+            sim_results_2, slot_candidates, rp, upset_mode, upset_values
+        )
+        opp_max_scores_2 = _precompute_opponent_late_round_scores(
+            bracket, pick_pcts, pool_size, sim_results_2, rng, rp, upset_mode, upset_values
+        )
+        refined: list[tuple[tuple, tuple]] = []
+        for orig_score, cfg in all_scored[:refine_n]:
+            champ_r, f4_r, semis_r = cfg
+            late_win_rate_2, avg_late_score_2 = _evaluate_late_rounds_from_sims(
+                f4_r, semis_r[0], semis_r[1], champ_r,
+                score_cache_2, opp_max_scores_2, pool_size
+            )
+            # Reuse the heuristic score from pass 1 (deterministic)
+            refined_score = (
+                late_win_rate_2,
+                accuracy_weight * avg_late_score_2 + (1 - accuracy_weight) * orig_score[2],
+                orig_score[2],
+            )
+            refined.append((refined_score, cfg))
+        refined.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_config = refined[0]
+    else:
+        best_score = all_scored[0][0] if all_scored else None
+        best_config = all_scored[0][1] if all_scored else None
 
     if best_config is None:
         # Fallback: pick highest-rated team
@@ -220,8 +253,14 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
         total_emv += emv
 
     # Score semifinal winners (round 5 = Final Four)
+    # Use Log5 for the specific matchup instead of marginal reach probabilities,
+    # then weight by the probability both teams actually reached the Final Four.
     for winner, loser in [(semi1_winner, semi1_loser), (semi2_winner, semi2_loser)]:
-        p_reach = _conditional_advance_prob(winner, 5, reach_probs)
+        p_winner_f4 = reach_probs.get(winner.name, {}).get(5, 0.0)
+        p_loser_f4 = reach_probs.get(loser.name, {}).get(5, 0.0)
+        p_matchup_win = log5(winner.rating, loser.rating)
+        # P(winner wins this semifinal) ≈ P(both reach F4) × P(winner beats loser)
+        p_reach = p_winner_f4 * p_loser_f4 * p_matchup_win
         pick_frac = get_matchup_pick_prob(
             pick_pcts, winner.name, winner.seed, loser.name, loser.seed, 6
         )
@@ -230,7 +269,14 @@ def _quick_eval_late_rounds(f4_teams, semi1_winner, semi1_loser,
         total_emv += emv
 
     # Score champion (round 6 = Championship)
-    p_champ = _conditional_advance_prob(champion, 6, reach_probs)
+    # Use Log5 for the specific championship matchup.
+    p_semi1_win = reach_probs.get(semi1_winner.name, {}).get(5, 0.0) * \
+                  reach_probs.get(semi1_loser.name, {}).get(5, 0.0) * \
+                  log5(semi1_winner.rating, semi1_loser.rating)
+    p_semi2_win = reach_probs.get(semi2_winner.name, {}).get(5, 0.0) * \
+                  reach_probs.get(semi2_loser.name, {}).get(5, 0.0) * \
+                  log5(semi2_winner.rating, semi2_loser.rating)
+    p_champ = p_semi1_win * p_semi2_win * log5(champion.rating, champ_loser.rating)
     champ_pick = get_matchup_pick_prob(
         pick_pcts, champion.name, champion.seed, champ_loser.name, champ_loser.seed, 7
     )
@@ -340,8 +386,12 @@ def _optimize_region_subtree(bracket: Bracket,
             shared_picks.update(picks_b)
 
             for winner, loser in ((team_a, team_b), (team_b, team_a)):
+                # Use unconditional reach probability P(team wins this game)
+                # = P(team reaches next round), NOT the conditional
+                # P(win | reached) which inflates deep upset path values.
+                model_prob = reach_probs.get(winner.name, {}).get(round_num + 1, 0.0)
                 pick_value = _compute_pick_value(
-                    _conditional_advance_prob(winner, round_num, reach_probs),
+                    model_prob,
                     get_matchup_pick_prob(
                         pick_pcts,
                         winner.name,
@@ -392,6 +442,10 @@ def _validate(picks, bracket, pick_pcts, pool_size, n_sims, rng,
 
         if my_score > max_opp_score:
             wins += 1
+        elif my_score == max_opp_score:
+            # Split ties: in real pools ties are broken by tiebreaker,
+            # model as 50/50 to avoid systematic pessimism.
+            wins += 0.5
 
     return wins / n_sims, total_score / n_sims
 
@@ -501,7 +555,14 @@ def _evaluate_late_rounds_from_sims(f4_teams: list[Team],
         score_cache[3][semi2_winner.name],
         score_cache[1][champion.name],
     ))
-    late_win_rate = 1.0 if pool_size <= 1 else float(np.mean(our_scores > opp_max_scores))
+    if pool_size <= 1:
+        late_win_rate = 1.0
+    else:
+        # Count outright wins + half credit for ties (tiebreaker modeled as 50/50)
+        late_win_rate = float(np.mean(
+            (our_scores > opp_max_scores).astype(float)
+            + 0.5 * (our_scores == opp_max_scores).astype(float)
+        ))
     avg_late_score = float(np.mean(our_scores))
     return late_win_rate, avg_late_score
 

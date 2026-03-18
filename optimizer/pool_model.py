@@ -3,6 +3,11 @@
 Generates simulated opponent brackets based on public pick percentages.
 In a small pool (5-10 people), opponents are modeled as "typical" bracket
 fillers who roughly follow public sentiment with some noise.
+
+Opponent brackets use correlated picks: once a team is picked to win a game,
+that same team is carried forward into later rounds (as a real bracket filler
+would). The per-round pick data influences the initial decision, but subsequent
+rounds inherit the earlier pick with a consistency bias.
 """
 
 import numpy as np
@@ -15,11 +20,14 @@ from optimizer.pick_utils import get_pick_pct
 
 def generate_opponent_bracket(bracket: Bracket, pick_pcts: dict[str, dict[int, float]],
                               rng: np.random.Generator) -> Bracket:
-    """Generate a single simulated opponent bracket.
+    """Generate a single simulated opponent bracket with correlated picks.
 
-    The opponent picks each game winner based on public pick percentages.
-    When per-round pick data is available, use it directly.
-    When only championship pick data is available, fall back to rating-biased picks.
+    The opponent picks each game winner based on public pick percentages,
+    but with bracket-coherent correlation: once a team is picked to advance,
+    that team is the one competing in the next round (just like a real person
+    filling out a bracket). The pick probability for later rounds still uses
+    the public pick data for that specific round, but the candidate teams are
+    constrained by earlier picks.
 
     Args:
         bracket: The base 64-team bracket (teams in starting slots)
@@ -38,7 +46,10 @@ def generate_opponent_bracket(bracket: Bracket, pick_pcts: dict[str, dict[int, f
                 opp.slots[game_slot] = team_a or team_b
                 continue
 
-            # Determine pick probability for team_a
+            # Determine pick probability for team_a in this specific matchup.
+            # Because we fill round-by-round and propagate winners, team_a and
+            # team_b are already the teams this opponent "advanced" from prior
+            # rounds, giving natural bracket correlation.
             p_pick_a = _get_pick_prob(team_a, team_b, round_num, pick_pcts)
 
             opp.slots[game_slot] = team_a if rng.random() < p_pick_a else team_b
