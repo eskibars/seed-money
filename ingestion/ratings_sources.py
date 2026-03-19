@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import config
 from ingestion.manual_entry import load_ratings_from_csv
+from optimizer.rating_utils import build_consensus_ratings
 
 
 def fetch_ratings_from_source(source: str,
@@ -11,6 +13,25 @@ def fetch_ratings_from_source(source: str,
                               file: str | None = None) -> dict[str, dict]:
     """Fetch or load team ratings from a named source."""
     source = source.strip().lower()
+
+    if source == "consensus":
+        ratings_by_source = {}
+        errors = []
+        for component in config.RATING_SOURCE_WEIGHTS:
+            try:
+                ratings = fetch_ratings_from_source(component, year=year, save=save, file=file)
+            except Exception as exc:
+                errors.append(f"{component}={exc}")
+                continue
+            if ratings:
+                ratings_by_source[component] = ratings
+
+        consensus = build_consensus_ratings(ratings_by_source)
+        if consensus:
+            return consensus
+
+        details = f" Errors: {'; '.join(errors)}" if errors else ""
+        raise ValueError(f"Could not build consensus ratings.{details}")
 
     if source == "torvik":
         from ingestion.torvik import fetch_torvik_ratings, parse_torvik_ratings
@@ -36,6 +57,12 @@ def fetch_ratings_from_source(source: str,
                 "adj_defense": 100.0,
             }
         return ratings
+
+    if source == "paine":
+        from ingestion.neil_paine import fetch_neil_paine_ratings, parse_neil_paine_ratings
+
+        df = fetch_neil_paine_ratings(year=year, save=save, file=file)
+        return parse_neil_paine_ratings(df)
 
     if source == "manual":
         if not file:

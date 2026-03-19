@@ -12,6 +12,7 @@ from ingestion.bracket_loader import load_bracket_from_dict
 from optimizer.simulator import simulate_tournament
 from optimizer.engine import optimize
 from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names
+from optimizer.rating_utils import build_consensus_ratings
 from output.html_export import export_bracket_html
 from web.database import get_latest_ratings, get_latest_bracket_record, get_pick_sources
 
@@ -109,15 +110,7 @@ def run_optimization(job_id, job_config, conn):
     bracket_year = bracket_record["year"]
 
     simulation_source = job_config.get("simulation_source", config.DEFAULT_SIMULATION_SOURCE)
-    ratings = get_latest_ratings(conn, source=simulation_source, year=bracket_year)
-    if not ratings:
-        ratings = get_latest_ratings(conn, source=simulation_source)
-    if not ratings:
-        source_label = config.RATING_SOURCES.get(simulation_source, {}).get("label", simulation_source)
-        raise RuntimeError(
-            f"No {source_label} ratings available for simulation. "
-            f"Run /admin/refresh with ratings_source={simulation_source} first."
-        )
+    ratings = _load_simulation_ratings(conn, simulation_source, bracket_year)
 
     pick_sources = get_pick_sources(conn, year=bracket_record["year"])
     bracket_teams = extract_bracket_team_names(bracket_data)
@@ -176,6 +169,39 @@ def run_optimization(job_id, job_config, conn):
         json.dump(job_config, f, indent=2)
 
     return {"html": html_path, "json": json_path, "config": config_path}
+
+
+def _load_simulation_ratings(conn, simulation_source, year):
+    """Load either a single ratings source or the cached consensus blend."""
+    if simulation_source == "consensus":
+        ratings_by_source = {}
+        for source in config.RATING_SOURCE_WEIGHTS:
+            ratings = get_latest_ratings(conn, source=source, year=year)
+            if not ratings:
+                ratings = get_latest_ratings(conn, source=source)
+            if ratings:
+                ratings_by_source[source] = ratings
+
+        consensus = build_consensus_ratings(ratings_by_source)
+        if consensus:
+            return consensus
+
+    ratings = get_latest_ratings(conn, source=simulation_source, year=year)
+    if not ratings:
+        ratings = get_latest_ratings(conn, source=simulation_source)
+    if ratings:
+        return ratings
+
+    source_label = config.RATING_SOURCES.get(simulation_source, {}).get("label", simulation_source)
+    if simulation_source == "consensus":
+        raise RuntimeError(
+            "No cached ratings available for the consensus blend. "
+            "Run /admin/refresh so Torvik, KenPom, ESPN, and Neil Paine ratings are loaded."
+        )
+    raise RuntimeError(
+        f"No {source_label} ratings available for simulation. "
+        f"Run /admin/refresh with ratings_source={simulation_source} first."
+    )
 
 
 def _serialize_bracket(bracket, reach_probs):

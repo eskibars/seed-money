@@ -18,9 +18,14 @@ DEFAULT_POOL_SIZE = 7
 # Optimizer settings
 DEFAULT_SIMULATIONS = 10_000
 DEFAULT_ACCURACY_WEIGHT = 0.75  # 0=full contrarian, 1=full accuracy
-DEFAULT_SIMULATION_SOURCE = "torvik"
+DEFAULT_SIMULATION_SOURCE = "consensus"
 
 RATING_SOURCES = {
+    "consensus": {
+        "label": "Consensus Blend",
+        "web": True,
+        "refresh_default": False,
+    },
     "torvik": {
         "label": "Bart Torvik",
         "web": True,
@@ -36,6 +41,11 @@ RATING_SOURCES = {
         "web": False,
         "refresh_default": True,
     },
+    "paine": {
+        "label": "Neil Paine",
+        "web": True,
+        "refresh_default": True,
+    },
     "manual": {
         "label": "Manual CSV",
         "web": False,
@@ -47,6 +57,13 @@ DEFAULT_REFRESH_RATING_SOURCES = tuple(
     for source, meta in RATING_SOURCES.items()
     if meta.get("refresh_default")
 )
+
+RATING_SOURCE_WEIGHTS = {
+    "torvik": 0.45,
+    "kenpom": 0.30,
+    "espn": 0.15,
+    "paine": 0.10,
+}
 
 # Scoring presets for common pool formats
 SCORING_PRESETS = {

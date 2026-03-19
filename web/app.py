@@ -37,7 +37,7 @@ def create_app():
     @app.route("/")
     def index():
         conn = get_db()
-        teams = get_team_list(conn)
+        teams = get_team_list(conn, source=config.DEFAULT_SIMULATION_SOURCE)
         conn.close()
         simulation_sources = {
             source: meta
@@ -219,7 +219,7 @@ def create_app():
     @app.route("/api/teams")
     def api_teams():
         conn = get_db()
-        teams = get_team_list(conn)
+        teams = get_team_list(conn, source=config.DEFAULT_SIMULATION_SOURCE)
         conn.close()
         return jsonify(teams)
 

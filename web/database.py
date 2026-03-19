@@ -1,8 +1,11 @@
 """SQLite database setup and helpers."""
 
+import config
 import json
 import os
 import sqlite3
+
+from optimizer.rating_utils import build_consensus_ratings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "seed_money.db")
 
@@ -192,6 +195,20 @@ def get_queue_position(conn, job_id):
 
 def get_team_list(conn, source=None, year=None):
     """Get list of team names from cached ratings (for autocomplete)."""
+    if source == "consensus":
+        ratings_by_source = {}
+        for component in config.RATING_SOURCE_WEIGHTS:
+            ratings = get_latest_ratings(conn, source=component, year=year)
+            if not ratings and year is not None:
+                ratings = get_latest_ratings(conn, source=component)
+            if ratings:
+                ratings_by_source[component] = ratings
+
+        consensus = build_consensus_ratings(ratings_by_source)
+        if consensus:
+            return sorted(consensus.keys())
+        return []
+
     ratings = get_latest_ratings(conn, source=source, year=year)
     if ratings:
         return sorted(ratings.keys())

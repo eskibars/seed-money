@@ -10,7 +10,24 @@ import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names, filter_pick_pcts_to_teams
+from optimizer.rating_utils import build_consensus_ratings
 from web.database import get_latest_bracket_record, get_latest_ratings, get_pick_sources
+
+
+def _get_reference_ratings(conn, year=2026):
+    """Build a broad ratings table for name resolution across ingest steps."""
+    ratings_by_source = {}
+    for source in config.RATING_SOURCE_WEIGHTS:
+        ratings = get_latest_ratings(conn, source=source, year=year)
+        if not ratings and year is not None:
+            ratings = get_latest_ratings(conn, source=source)
+        if ratings:
+            ratings_by_source[source] = ratings
+
+    consensus = build_consensus_ratings(ratings_by_source)
+    if consensus:
+        return consensus
+    return get_latest_ratings(conn) or {}
 
 
 def refresh_ratings(conn, source="torvik", year=2026):
@@ -43,7 +60,7 @@ def refresh_ratings(conn, source="torvik", year=2026):
 def refresh_picks(conn, source="yahoo", year=2026, game_key=None, challenge_id=None):
     """Fetch latest public pick percentages and store in DB."""
     try:
-        ratings = get_latest_ratings(conn) or {}
+        ratings = _get_reference_ratings(conn, year=year)
         bracket_record = get_latest_bracket_record(conn, year=year)
         bracket_teams = extract_bracket_team_names(bracket_record["data"]) if bracket_record else set()
         if source == "espn":
@@ -133,7 +150,7 @@ def refresh_bracket(conn,
             if source == "yahoo":
                 from ingestion.bracket_fetcher import fetch_yahoo_bracket
 
-                ratings = get_latest_ratings(conn) or {}
+                ratings = _get_reference_ratings(conn, year=year)
                 bracket_json, fetched = fetch_yahoo_bracket(
                     year=year,
                     game_key=game_key,
