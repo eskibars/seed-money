@@ -43,8 +43,20 @@ def normalize_pick_pcts(pick_pcts: dict[str, dict[int, float]] | None) -> dict[s
     normalized: dict[str, dict[int, float]] = {}
     for team, rounds in pick_pcts.items():
         int_rounds = {int(r): v for r, v in rounds.items()}
+        # Detect old convention (keys 1-6) vs new convention (keys 2-7).
+        # Old convention: has key 1, max key <= 6, no key 7.
+        # New convention: has key 7 (or keys only in 2-7 range).
+        # Mixed/ambiguous: has key 1 AND key 7 — drop key 1 only.
         if 1 in int_rounds:
-            int_rounds = {round_num + 1: v for round_num, v in int_rounds.items()}
+            has_new_keys = 7 in int_rounds or max(int_rounds.keys()) > 6
+            if not has_new_keys:
+                # Pure old convention: shift all keys forward by 1
+                int_rounds = {round_num + 1: v for round_num, v in int_rounds.items()}
+            else:
+                # Already new convention with a stray key 1: just drop it.
+                # Key 1 in new convention would mean "in tournament" (always ~1.0)
+                # which is not useful for pick percentages.
+                del int_rounds[1]
         normalized[team] = int_rounds
 
     return normalized
