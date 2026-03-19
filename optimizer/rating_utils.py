@@ -14,7 +14,13 @@ def build_consensus_ratings(
     ratings_by_source: dict[str, dict[str, dict]] | None,
     source_weights: dict[str, float] | None = None,
 ) -> dict[str, dict]:
-    """Blend multiple ratings sources into one consensus ratings table."""
+    """Blend multiple ratings sources into one consensus ratings table.
+
+    Consensus is intentionally ratings-only. If a component source includes
+    direct round-by-round forecast odds (for example Neil Paine), those odds
+    remain available when that source is selected explicitly, but they should
+    not override the blended simulation path for the default consensus source.
+    """
     if not ratings_by_source:
         return {}
 
@@ -42,8 +48,6 @@ def build_consensus_ratings(
         offense_weight = 0.0
         defense_total = 0.0
         defense_weight = 0.0
-        reach_totals = {round_num: 0.0 for round_num in range(1, 8)}
-        reach_weights = {round_num: 0.0 for round_num in range(1, 8)}
 
         for source, ratings in normalized_sources.items():
             entry = ratings.get(team)
@@ -67,10 +71,6 @@ def build_consensus_ratings(
                 defense_total += weight * adj_defense
                 defense_weight += weight
 
-            for round_num, prob in _coerce_reach_probs(entry.get("reach_probs")).items():
-                reach_totals[round_num] += weight * _clamp_fraction(prob)
-                reach_weights[round_num] += weight
-
         if rating_weight <= 0:
             continue
 
@@ -79,13 +79,6 @@ def build_consensus_ratings(
             "adj_offense": offense_total / offense_weight if offense_weight > 0 else 100.0,
             "adj_defense": defense_total / defense_weight if defense_weight > 0 else 100.0,
         }
-        reach_probs = {
-            round_num: reach_totals[round_num] / reach_weights[round_num]
-            for round_num in range(1, 8)
-            if reach_weights[round_num] > 0
-        }
-        if reach_probs:
-            consensus_entry["reach_probs"] = reach_probs
 
         consensus[team] = consensus_entry
 

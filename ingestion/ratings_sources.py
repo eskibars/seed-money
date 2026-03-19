@@ -86,6 +86,9 @@ def upgrade_loaded_ratings(source: str | None,
         return ratings
 
     source = source.strip().lower()
+    if source == "consensus":
+        return _strip_direct_reach_probs(ratings)
+
     if source != "paine":
         return ratings
 
@@ -112,3 +115,25 @@ def _needs_paine_refresh(ratings: dict[str, dict]) -> bool:
         if "raw_rating" in entry and "reach_probs" in entry:
             return True
     return False
+
+
+def _strip_direct_reach_probs(ratings: dict[str, dict]) -> dict[str, dict]:
+    """Remove cached direct forecast odds from consensus ratings payloads."""
+    changed = False
+    stripped: dict[str, dict] = {}
+
+    for team, entry in ratings.items():
+        if not isinstance(entry, dict):
+            stripped[team] = entry
+            continue
+
+        if "reach_probs" not in entry:
+            stripped[team] = entry
+            continue
+
+        changed = True
+        cleaned = dict(entry)
+        cleaned.pop("reach_probs", None)
+        stripped[team] = cleaned
+
+    return stripped if changed else ratings

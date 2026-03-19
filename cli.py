@@ -47,6 +47,9 @@ def load_state() -> dict:
         if ratings_source is None and _looks_like_paine_ratings(ratings):
             ratings_source = "paine"
             state["ratings_source"] = ratings_source
+        elif ratings_source is None and _looks_like_consensus_ratings(ratings):
+            ratings_source = "consensus"
+            state["ratings_source"] = ratings_source
         upgraded = upgrade_loaded_ratings(ratings_source, ratings)
         if upgraded is not ratings:
             state["ratings"] = upgraded
@@ -70,6 +73,23 @@ def _looks_like_paine_ratings(ratings: dict | None) -> bool:
         if "raw_rating" in entry and "reach_probs" in entry:
             return True
     return False
+
+
+def _looks_like_consensus_ratings(ratings: dict | None) -> bool:
+    """Infer whether a cached ratings payload looks like an old consensus blend."""
+    if not isinstance(ratings, dict) or not ratings:
+        return False
+
+    saw_reach_probs = False
+    for entry in ratings.values():
+        if not isinstance(entry, dict):
+            return False
+        if "raw_rating" in entry or entry.get("forecast_source") == "neil_paine":
+            return False
+        if "reach_probs" in entry:
+            saw_reach_probs = True
+
+    return saw_reach_probs
 
 
 # --- Commands ---
