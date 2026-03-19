@@ -1,6 +1,16 @@
 """Utilities for working with public pick percentage data."""
 
+from __future__ import annotations
+
+from functools import lru_cache
+import html as html_lib
+import json
+import os
+import re
+
 import config
+
+ALIASES_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "team_aliases.json")
 
 
 def default_pick_pct(seed: int, round_reaching: int) -> float:
@@ -36,13 +46,23 @@ def normalize_pick_pcts(pick_pcts: dict[str, dict[int, float]] | None) -> dict[s
 
     Older cached/manual data may still use keys 1-6. When that shape is
     detected, shift the rounds forward by one.
+
+    Team names are also canonicalized through the shared alias table so later
+    bracket lookups do not silently miss valid public-pick rows.
     """
     if not pick_pcts:
         return {}
 
-    normalized: dict[str, dict[int, float]] = {}
+    aliases = _load_team_aliases()
+    merged: dict[str, dict[int, list[float]]] = {}
     for team, rounds in pick_pcts.items():
-        int_rounds = {int(r): v for r, v in rounds.items()}
+        canonical_team = _canonical_team_name(team, aliases)
+        int_rounds = {}
+        for round_num, value in (rounds or {}).items():
+            try:
+                int_rounds[int(round_num)] = float(value)
+            except (TypeError, ValueError):
+                continue
         # Detect old convention (keys 1-6) vs new convention (keys 2-7).
         # Old convention: has key 1, max key <= 6, no key 7.
         # New convention: has key 7 (or keys only in 2-7 range).
@@ -57,9 +77,18 @@ def normalize_pick_pcts(pick_pcts: dict[str, dict[int, float]] | None) -> dict[s
                 # Key 1 in new convention would mean "in tournament" (always ~1.0)
                 # which is not useful for pick percentages.
                 del int_rounds[1]
-        normalized[team] = int_rounds
 
-    return normalized
+        team_entry = merged.setdefault(canonical_team, {})
+        for round_num, value in int_rounds.items():
+            team_entry.setdefault(round_num, []).append(max(0.0, min(1.0, value)))
+
+    return {
+        team: {
+            round_num: sum(values) / len(values)
+            for round_num, values in rounds.items()
+        }
+        for team, rounds in merged.items()
+    }
 
 
 def get_pick_pct(pick_pcts: dict[str, dict[int, float]],
@@ -67,7 +96,7 @@ def get_pick_pct(pick_pcts: dict[str, dict[int, float]],
                  round_reaching: int,
                  default: float) -> float:
     """Look up a team's public pick rate with compatibility for legacy data."""
-    rounds = pick_pcts.get(team_name, {})
+    rounds = _lookup_pick_rounds(pick_pcts, team_name)
     if round_reaching in rounds:
         return rounds[round_reaching]
 
@@ -171,16 +200,28 @@ def filter_pick_pcts_to_teams(
     pick_pcts: dict[str, dict[int, float]] | None,
     allowed_teams: set[str] | None,
 ) -> dict[str, dict[int, float]]:
-    """Keep only pick rows that belong to the current bracket field."""
+    """Keep only pick rows that belong to the current bracket field.
+
+    Returned keys use the bracket's team labels so downstream exact lookups work
+    even when the source data arrived under an alias or a canonical name.
+    """
     normalized = normalize_pick_pcts(pick_pcts)
     if not normalized or not allowed_teams:
         return normalized
 
-    return {
-        team: rounds
-        for team, rounds in normalized.items()
-        if team in allowed_teams
-    }
+    aliases = _load_team_aliases()
+    allowed_lookup: dict[str, str] = {}
+    for team in allowed_teams:
+        allowed_lookup.setdefault(_canonical_team_name(team, aliases), team)
+
+    filtered: dict[str, dict[int, float]] = {}
+    for team, rounds in normalized.items():
+        bracket_team = allowed_lookup.get(_canonical_team_name(team, aliases))
+        if not bracket_team:
+            continue
+        filtered[bracket_team] = dict(rounds)
+
+    return filtered
 
 
 def extract_bracket_team_names(bracket_data: dict | None) -> set[str]:
@@ -216,3 +257,72 @@ def merge_pick_pcts(
         }
         for team, rounds in merged.items()
     }
+
+
+def _lookup_pick_rounds(
+    pick_pcts: dict[str, dict[int, float]] | None,
+    team_name: str,
+) -> dict[int, float]:
+    """Resolve a team's pick row with alias awareness."""
+    if not pick_pcts:
+        return {}
+    if team_name in pick_pcts:
+        return pick_pcts[team_name]
+
+    aliases = _load_team_aliases()
+    canonical = _canonical_team_name(team_name, aliases)
+    if canonical in pick_pcts:
+        return pick_pcts[canonical]
+
+    normalized_target = _normalize_team_name(team_name)
+    for candidate, rounds in pick_pcts.items():
+        if _normalize_team_name(candidate) == normalized_target:
+            return rounds
+        if _canonical_team_name(candidate, aliases) == canonical:
+            return rounds
+
+    return {}
+
+
+@lru_cache(maxsize=1)
+def _load_team_aliases() -> dict[str, str]:
+    """Load normalized alias -> canonical team mappings."""
+    if not os.path.exists(ALIASES_PATH):
+        return {}
+
+    with open(ALIASES_PATH, "r", encoding="utf-8") as f:
+        raw_aliases = json.load(f)
+
+    aliases: dict[str, str] = {}
+    for alias, canonical in raw_aliases.items():
+        if alias.startswith("_comment"):
+            continue
+        aliases[_normalize_team_name(alias)] = canonical
+        aliases.setdefault(_normalize_team_name(canonical), canonical)
+
+    return aliases
+
+
+def _canonical_team_name(team_name: str, aliases: dict[str, str] | None = None) -> str:
+    """Map an arbitrary team label to the project's canonical team name."""
+    text = str(team_name or "").strip()
+    if not text:
+        return text
+    aliases = aliases or _load_team_aliases()
+    return aliases.get(_normalize_team_name(text), text)
+
+
+def _normalize_team_name(text: str) -> str:
+    """Normalize punctuation/case for alias lookups."""
+    replacements = {
+        "\xa0": " ",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u2013": "-",
+        "\u2014": "-",
+    }
+    normalized = html_lib.unescape(text or "")
+    for src, dest in replacements.items():
+        normalized = normalized.replace(src, dest)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip().lower()

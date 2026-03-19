@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from ingestion.ratings_sources import upgrade_loaded_ratings
-from optimizer.pick_utils import normalize_pick_pcts
+from optimizer.pick_utils import filter_pick_pcts_to_teams, normalize_pick_pcts
 from optimizer.reach_prob_utils import resolve_reach_probs
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -126,16 +126,24 @@ def cmd_load_bracket(args):
 def cmd_fetch_picks(args):
     """Fetch public pick percentages."""
     state = load_state()
+    ratings = state.get("ratings", {})
+    bracket = state.get("bracket")
+    bracket_teams = {team.name for team in getattr(bracket, "teams", [])}
 
     if args.manual:
         from ingestion.manual_entry import load_pick_pcts_from_csv
         pick_pcts = load_pick_pcts_from_csv(args.manual)
     elif args.source == "espn":
         from ingestion.pick_popularity import fetch_espn_picks
-        pick_pcts = fetch_espn_picks(year=args.year, challenge_id=args.challenge_id)
+        pick_pcts = fetch_espn_picks(
+            year=args.year,
+            challenge_id=args.challenge_id,
+            ratings=ratings,
+            bracket_teams=bracket_teams,
+        )
     elif args.source == "yahoo":
         from ingestion.pick_popularity import fetch_yahoo_picks
-        pick_pcts = fetch_yahoo_picks(year=args.year)
+        pick_pcts = fetch_yahoo_picks(year=args.year, ratings=ratings)
     else:
         print(f"Unknown source: {args.source}")
         return
@@ -146,9 +154,14 @@ def cmd_fetch_picks(args):
         return
 
     pick_pcts = normalize_pick_pcts(pick_pcts)
+    if bracket_teams:
+        pick_pcts = filter_pick_pcts_to_teams(pick_pcts, bracket_teams)
     state["pick_pcts"] = pick_pcts
     save_state(state)
-    print(f"\nLoaded pick percentages for {len(pick_pcts)} teams")
+    if bracket_teams:
+        print(f"\nLoaded pick percentages for {len(pick_pcts)} of {len(bracket_teams)} bracket teams")
+    else:
+        print(f"\nLoaded pick percentages for {len(pick_pcts)} teams")
 
 
 def cmd_simulate(args):
