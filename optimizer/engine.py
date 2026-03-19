@@ -306,7 +306,12 @@ def _compute_pick_value(model_prob: float, public_prob: float, points: float,
     leverage_ratio = min(4.0, max(0.25, leverage_ratio))
 
     contrarian_weight = max(0.0, 1.0 - accuracy_weight)
-    leverage_exponent = contrarian_weight * max(1.0, math.log(max(pool_size, 2)))
+    pool_term = max(1.0, math.log(max(pool_size, 2)))
+    # Make the slider more responsive in small pools. The previous mapping
+    # only nudged the leverage exponent from ~0.5 to ~1.2 when moving from
+    # 0.75 to 0.40 in a 7-person pool, which barely changed first-round picks.
+    slider_term = contrarian_weight / max(0.5, accuracy_weight)
+    leverage_exponent = min(3.5, pool_term * slider_term)
     leverage_multiplier = leverage_ratio ** leverage_exponent
 
     return model_prob * points * leverage_multiplier
