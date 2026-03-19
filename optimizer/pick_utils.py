@@ -259,6 +259,23 @@ def merge_pick_pcts(
     }
 
 
+def summarize_pick_coverage(
+    pick_pcts: dict[str, dict[int, float]] | None,
+    allowed_teams: set[str] | None = None,
+) -> dict[str, object]:
+    """Summarize how much usable public-pick coverage is available."""
+    usable = filter_pick_pcts_to_teams(pick_pcts, allowed_teams) if allowed_teams else normalize_pick_pcts(pick_pcts)
+    round_counts = {
+        round_num: sum(1 for rounds in usable.values() if round_num in rounds)
+        for round_num in range(2, 8)
+    }
+    return {
+        "team_count": len(usable),
+        "total_teams": len(allowed_teams) if allowed_teams else len(usable),
+        "round_counts": round_counts,
+    }
+
+
 def _lookup_pick_rounds(
     pick_pcts: dict[str, dict[int, float]] | None,
     team_name: str,

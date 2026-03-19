@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 from ingestion.bracket_loader import load_bracket_from_dict
 from optimizer.engine import optimize
-from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names
+from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names, summarize_pick_coverage
 from optimizer.reach_prob_utils import resolve_reach_probs
 from optimizer.rating_utils import build_consensus_ratings
 from output.html_export import export_bracket_html
@@ -119,6 +119,12 @@ def run_optimization(job_id, job_config, conn):
     # Apply user biases
     biases = job_config.get("biases", [])
     pick_pcts = apply_biases(pick_pcts, biases)
+    pick_coverage = summarize_pick_coverage(pick_pcts, bracket_teams)
+    if pick_coverage["round_counts"].get(2, 0) == 0:
+        raise RuntimeError(
+            "No Round-of-64 public pick data is cached for this bracket. "
+            "Refresh ESPN/Yahoo pick sources before optimizing."
+        )
 
     # Build bracket
     bracket = load_bracket_from_dict(bracket_data, ratings)

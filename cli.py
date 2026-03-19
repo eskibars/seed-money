@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from ingestion.ratings_sources import upgrade_loaded_ratings
-from optimizer.pick_utils import filter_pick_pcts_to_teams, normalize_pick_pcts
+from optimizer.pick_utils import filter_pick_pcts_to_teams, normalize_pick_pcts, summarize_pick_coverage
 from optimizer.reach_prob_utils import resolve_reach_probs
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -218,11 +218,23 @@ def cmd_optimize(args):
         state["reach_probs"] = reach_probs
 
     pick_pcts = normalize_pick_pcts(state.get("pick_pcts", {}))
+    bracket_teams = {team.name for team in getattr(bracket, "teams", [])}
+    if bracket_teams:
+        pick_pcts = filter_pick_pcts_to_teams(pick_pcts, bracket_teams)
     state["pick_pcts"] = pick_pcts
-    if not pick_pcts and not args.no_picks:
-        print("WARNING: No pick percentage data loaded.")
-        print("Running in probability-only mode (no contrarian component).")
-        print("To include public pick data, run 'python cli.py fetch-picks' first.\n")
+    coverage = summarize_pick_coverage(pick_pcts, bracket_teams or None)
+    round1_pick_count = coverage["round_counts"].get(2, 0)
+    if round1_pick_count == 0 and not args.no_picks:
+        print("ERROR: No Round-of-64 public pick data loaded for this bracket.")
+        print("Fetch picks first with 'python cli.py fetch-picks ...'.")
+        print("If you intentionally want probability-only mode, rerun with '--no-picks'.\n")
+        return
+    if round1_pick_count < coverage["total_teams"] and not args.no_picks:
+        print(
+            f"WARNING: Round-of-64 public pick data only covers "
+            f"{round1_pick_count} of {coverage['total_teams']} teams."
+        )
+        print("Early-round upset leverage may be understated.\n")
 
     from optimizer.engine import optimize
     optimized = optimize(
