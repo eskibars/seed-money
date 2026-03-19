@@ -76,3 +76,39 @@ def fetch_ratings_from_source(source: str,
         return load_ratings_from_csv(file)
 
     raise ValueError(f"Unknown ratings source: {source}")
+
+
+def upgrade_loaded_ratings(source: str | None,
+                           ratings: dict[str, dict] | None,
+                           year: int | None = None) -> dict[str, dict] | None:
+    """Upgrade cached ratings payloads after parser/schema fixes."""
+    if not ratings or not source:
+        return ratings
+
+    source = source.strip().lower()
+    if source != "paine":
+        return ratings
+
+    if not _needs_paine_refresh(ratings):
+        return ratings
+
+    refresh_year = year if year is not None else 2026
+    try:
+        from ingestion.neil_paine import fetch_neil_paine_ratings, parse_neil_paine_ratings
+
+        df = fetch_neil_paine_ratings(year=refresh_year, save=False)
+        return parse_neil_paine_ratings(df)
+    except Exception:
+        return ratings
+
+
+def _needs_paine_refresh(ratings: dict[str, dict]) -> bool:
+    """Detect stale Neil payloads from the pre-fix parser."""
+    for entry in ratings.values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("forecast_source") == "neil_paine":
+            return int(entry.get("forecast_version", 0) or 0) < 2
+        if "raw_rating" in entry and "reach_probs" in entry:
+            return True
+    return False

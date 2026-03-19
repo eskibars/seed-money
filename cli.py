@@ -20,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
+from ingestion.ratings_sources import upgrade_loaded_ratings
 from optimizer.pick_utils import normalize_pick_pcts
 from optimizer.reach_prob_utils import resolve_reach_probs
 
@@ -39,8 +40,36 @@ def load_state() -> dict:
     """Load intermediate state from disk."""
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "rb") as f:
-            return pickle.load(f)
+            state = pickle.load(f)
+
+        ratings = state.get("ratings")
+        ratings_source = state.get("ratings_source")
+        if ratings_source is None and _looks_like_paine_ratings(ratings):
+            ratings_source = "paine"
+            state["ratings_source"] = ratings_source
+        upgraded = upgrade_loaded_ratings(ratings_source, ratings)
+        if upgraded is not ratings:
+            state["ratings"] = upgraded
+            state.pop("reach_probs", None)
+            state.pop("optimized", None)
+            save_state(state)
+
+        return state
     return {}
+
+
+def _looks_like_paine_ratings(ratings: dict | None) -> bool:
+    """Infer whether a cached ratings payload came from Neil Paine."""
+    if not isinstance(ratings, dict):
+        return False
+    for entry in ratings.values():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("forecast_source") == "neil_paine":
+            return True
+        if "raw_rating" in entry and "reach_probs" in entry:
+            return True
+    return False
 
 
 # --- Commands ---

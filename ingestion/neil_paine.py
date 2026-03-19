@@ -13,6 +13,7 @@ import shutil
 import pandas as pd
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "raw")
+FORECAST_VERSION = 2
 
 
 def fetch_neil_paine_ratings(
@@ -88,6 +89,8 @@ def parse_neil_paine_ratings(df: pd.DataFrame) -> dict[str, dict]:
             "adj_defense": 100.0,
             "raw_rating": raw_rating,
             "reach_probs": reach_probs,
+            "forecast_source": "neil_paine",
+            "forecast_version": FORECAST_VERSION,
         }
 
     return ratings

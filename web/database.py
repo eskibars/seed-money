@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 
+from ingestion.ratings_sources import upgrade_loaded_ratings
 from optimizer.rating_utils import build_consensus_ratings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "seed_money.db")
@@ -70,7 +71,7 @@ def init_db(db_path=None):
 
 def get_latest_ratings(conn, source=None, year=None):
     """Get the most recent cached ratings, optionally filtered by source/year."""
-    query = "SELECT data_json FROM cached_ratings"
+    query = "SELECT source, year, data_json FROM cached_ratings"
     clauses = []
     params = []
 
@@ -87,7 +88,8 @@ def get_latest_ratings(conn, source=None, year=None):
     query += " ORDER BY fetched_at DESC LIMIT 1"
     row = conn.execute(query, params).fetchone()
     if row:
-        return json.loads(row["data_json"])
+        ratings = json.loads(row["data_json"])
+        return upgrade_loaded_ratings(row["source"], ratings, year=row["year"])
     return None
 
 
