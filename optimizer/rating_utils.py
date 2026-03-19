@@ -174,4 +174,24 @@ def _coerce_reach_probs(value) -> dict[int, float]:
             continue
         rounds[round_num] = prob
 
-    return rounds
+    return _repair_reach_prob_sequence(rounds)
+
+
+def _repair_reach_prob_sequence(rounds: dict[int, float]) -> dict[int, float]:
+    """Repair common percent-parsing mistakes and enforce monotonic reach odds."""
+    repaired = {round_num: _clamp_fraction(prob) for round_num, prob in rounds.items()}
+    previous = None
+
+    for round_num in sorted(repaired):
+        value = repaired[round_num]
+        if previous is not None and value > previous:
+            scaled = value / 100.0
+            if scaled <= previous:
+                value = scaled
+            else:
+                value = previous
+
+        repaired[round_num] = _clamp_fraction(value)
+        previous = repaired[round_num]
+
+    return repaired

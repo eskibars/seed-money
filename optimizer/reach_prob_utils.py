@@ -82,7 +82,27 @@ def _coerce_reach_probs(value) -> dict[int, float]:
             continue
         rounds[round_num] = max(0.0, min(1.0, prob))
 
-    return rounds
+    return _repair_reach_prob_sequence(rounds)
+
+
+def _repair_reach_prob_sequence(rounds: dict[int, float]) -> dict[int, float]:
+    """Repair common percent-parsing mistakes and enforce monotonic reach odds."""
+    repaired = dict(rounds)
+    previous = None
+
+    for round_num in sorted(repaired):
+        value = repaired[round_num]
+        if previous is not None and value > previous:
+            scaled = value / 100.0
+            if scaled <= previous:
+                value = scaled
+            else:
+                value = previous
+
+        repaired[round_num] = max(0.0, min(1.0, value))
+        previous = repaired[round_num]
+
+    return repaired
 
 
 def _load_aliases() -> dict[str, str]:

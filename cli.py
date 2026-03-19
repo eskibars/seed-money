@@ -59,6 +59,8 @@ def cmd_fetch_ratings(args):
 
     state["ratings"] = ratings
     state["ratings_source"] = args.source
+    state.pop("reach_probs", None)
+    state.pop("optimized", None)
     save_state(state)
 
     # Print top teams
@@ -86,6 +88,8 @@ def cmd_load_bracket(args):
         save_bracket_to_json(bracket, save_path)
 
     state["bracket"] = bracket
+    state.pop("reach_probs", None)
+    state.pop("optimized", None)
     save_state(state)
     print(f"\nBracket loaded: {len(bracket.teams)} teams in {len(bracket.regions)} regions")
 

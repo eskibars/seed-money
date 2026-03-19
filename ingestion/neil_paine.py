@@ -164,10 +164,11 @@ def _safe_float(value) -> float | None:
 
 def _to_probability(value) -> float:
     """Convert a percent-ish value into a 0-1 probability."""
+    raw_text = "" if value is None else str(value).strip()
     parsed = _safe_float(value)
     if parsed is None:
         return 0.0
-    if parsed > 1.0:
+    if "%" in raw_text or parsed > 1.0:
         parsed /= 100.0
     return max(0.0, min(1.0, parsed))
 
