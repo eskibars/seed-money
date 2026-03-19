@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
 from ingestion.bracket_loader import load_bracket_from_dict
-from optimizer.simulator import simulate_tournament
 from optimizer.engine import optimize
 from optimizer.pick_utils import build_consensus_pick_pcts, extract_bracket_team_names
+from optimizer.reach_prob_utils import resolve_reach_probs
 from optimizer.rating_utils import build_consensus_ratings
 from output.html_export import export_bracket_html
 from web.database import get_latest_ratings, get_latest_bracket_record, get_pick_sources
@@ -126,9 +126,16 @@ def run_optimization(job_id, job_config, conn):
     # Resolve scoring
     round_points = resolve_scoring(job_config)
 
-    # Run simulation
+    # Resolve reach probabilities from direct forecasts when available,
+    # otherwise fall back to Monte Carlo simulation.
     n_sims = int(job_config.get("sims", config.DEFAULT_SIMULATIONS))
-    reach_probs = simulate_tournament(bracket, n_sims=n_sims, seed=42, show_progress=False)
+    reach_probs = resolve_reach_probs(
+        bracket,
+        ratings,
+        n_sims=n_sims,
+        seed=42,
+        show_progress=False,
+    )
 
     # Run optimizer
     pool_size = int(job_config.get("pool_size", config.DEFAULT_POOL_SIZE))

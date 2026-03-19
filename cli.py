@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from optimizer.pick_utils import normalize_pick_pcts
+from optimizer.reach_prob_utils import resolve_reach_probs
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 RAW_DIR = os.path.join(DATA_DIR, "raw")
@@ -57,6 +58,7 @@ def cmd_fetch_ratings(args):
         return
 
     state["ratings"] = ratings
+    state["ratings_source"] = args.source
     save_state(state)
 
     # Print top teams
@@ -125,8 +127,14 @@ def cmd_simulate(args):
         print("ERROR: No bracket loaded. Run 'python cli.py load-bracket' first.")
         return
 
-    from optimizer.simulator import simulate_tournament
-    reach_probs = simulate_tournament(bracket, n_sims=args.sims, seed=42)
+    ratings = state.get("ratings", {})
+    reach_probs = resolve_reach_probs(
+        bracket,
+        ratings,
+        n_sims=args.sims,
+        seed=42,
+        show_progress=True,
+    )
 
     state["reach_probs"] = reach_probs
     save_state(state)
@@ -153,8 +161,14 @@ def cmd_optimize(args):
     reach_probs = state.get("reach_probs")
     if not reach_probs:
         print("Running tournament simulation first...")
-        from optimizer.simulator import simulate_tournament
-        reach_probs = simulate_tournament(bracket, n_sims=args.sims, seed=42)
+        ratings = state.get("ratings", {})
+        reach_probs = resolve_reach_probs(
+            bracket,
+            ratings,
+            n_sims=args.sims,
+            seed=42,
+            show_progress=True,
+        )
         state["reach_probs"] = reach_probs
 
     pick_pcts = normalize_pick_pcts(state.get("pick_pcts", {}))

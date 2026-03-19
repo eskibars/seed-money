@@ -47,6 +47,7 @@ def load_bracket_interactive(ratings: dict[str, dict] | None = None) -> Bracket:
                 rating=rating_info.get("rating", _default_rating_for_seed(seed)),
                 adj_offense=rating_info.get("adj_offense", 100.0),
                 adj_defense=rating_info.get("adj_defense", 100.0),
+                reach_probs=rating_info.get("reach_probs", {}),
             )
             teams_by_seed[seed] = team
 
@@ -102,6 +103,7 @@ def load_bracket_from_dict(data: dict, ratings: dict[str, dict] | None = None) -
                 rating=rating_info.get("rating", _default_rating_for_seed(seed)),
                 adj_offense=rating_info.get("adj_offense", 100.0),
                 adj_defense=rating_info.get("adj_defense", 100.0),
+                reach_probs=rating_info.get("reach_probs", {}),
             )
             teams_by_seed[seed] = team
 

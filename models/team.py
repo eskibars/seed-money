@@ -11,6 +11,8 @@ class Team:
     rating: float  # Barthag or composite power rating (0-1 scale)
     adj_offense: float = 0.0  # Adjusted offensive efficiency
     adj_defense: float = 0.0  # Adjusted defensive efficiency
+    # Optional source-provided tournament reach probabilities: {round_num: fraction}
+    reach_probs: dict[int, float] = field(default_factory=dict)
     # Public pick percentages by round: {round_num: fraction}
     pick_pcts: dict[int, float] = field(default_factory=dict)
 

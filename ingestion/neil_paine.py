@@ -1,7 +1,7 @@
 """Neil Paine forecast ingestion.
 
-The attached CSV carries a projected rating plus round-by-round odds. We use
-the rating column as an additional power-rating source for the consensus blend.
+The attached CSV carries both a projected rating and direct round-by-round odds.
+We preserve both so the optimizer can use his reach probabilities directly.
 """
 
 from __future__ import annotations
@@ -33,12 +33,34 @@ def fetch_neil_paine_ratings(
 
 
 def parse_neil_paine_ratings(df: pd.DataFrame) -> dict[str, dict]:
-    """Parse Neil Paine's rating export into the shared 0-1 ratings format."""
+    """Parse Neil Paine's forecast export into the shared source format."""
     columns = {_normalize_col(col): col for col in df.columns}
     team_col = columns.get("team")
     rtg_col = columns.get("rtg")
-    if not team_col or not rtg_col:
-        raise ValueError(f"Could not find Team/Rtg columns in Neil Paine CSV. Columns: {list(df.columns)}")
+    r64_col = columns.get("r64")
+    r32_col = columns.get("r32")
+    r16_col = columns.get("r16")
+    r8_col = columns.get("r8")
+    f4_col = columns.get("f4")
+    f2_col = columns.get("f2")
+    trophy_col = _find_col(columns, ["🏆", "champ", "title", "champion"])
+    required = {
+        "team": team_col,
+        "rtg": rtg_col,
+        "r64": r64_col,
+        "r32": r32_col,
+        "r16": r16_col,
+        "r8": r8_col,
+        "f4": f4_col,
+        "f2": f2_col,
+        "champ": trophy_col,
+    }
+    missing = [name for name, col in required.items() if not col]
+    if missing:
+        raise ValueError(
+            "Could not find expected Neil Paine columns "
+            f"{missing}. Columns: {list(df.columns)}"
+        )
 
     ratings: dict[str, dict] = {}
     for _, row in df.iterrows():
@@ -50,11 +72,22 @@ def parse_neil_paine_ratings(df: pd.DataFrame) -> dict[str, dict]:
         if raw_rating is None:
             continue
 
+        reach_probs = {
+            1: _to_probability(row.get(r64_col)),
+            2: _to_probability(row.get(r32_col)),
+            3: _to_probability(row.get(r16_col)),
+            4: _to_probability(row.get(r8_col)),
+            5: _to_probability(row.get(f4_col)),
+            6: _to_probability(row.get(f2_col)),
+            7: _to_probability(row.get(trophy_col)),
+        }
+
         ratings[name] = {
             "rating": _rtg_to_rating(raw_rating),
             "adj_offense": 100.0,
             "adj_defense": 100.0,
             "raw_rating": raw_rating,
+            "reach_probs": reach_probs,
         }
 
     return ratings
@@ -107,6 +140,15 @@ def _normalize_col(value) -> str:
     return str(value).strip().lower().replace(" ", "")
 
 
+def _find_col(columns: dict[str, str], candidates: list[str]) -> str | None:
+    """Find a column by normalized candidate names."""
+    for candidate in candidates:
+        normalized = _normalize_col(candidate)
+        if normalized in columns:
+            return columns[normalized]
+    return None
+
+
 def _safe_float(value) -> float | None:
     """Convert a numeric-ish cell to float."""
     if value is None:
@@ -118,6 +160,16 @@ def _safe_float(value) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+def _to_probability(value) -> float:
+    """Convert a percent-ish value into a 0-1 probability."""
+    parsed = _safe_float(value)
+    if parsed is None:
+        return 0.0
+    if parsed > 1.0:
+        parsed /= 100.0
+    return max(0.0, min(1.0, parsed))
 
 
 def _rtg_to_rating(rtg: float) -> float:

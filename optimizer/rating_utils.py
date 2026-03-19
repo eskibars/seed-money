@@ -42,6 +42,8 @@ def build_consensus_ratings(
         offense_weight = 0.0
         defense_total = 0.0
         defense_weight = 0.0
+        reach_totals = {round_num: 0.0 for round_num in range(1, 8)}
+        reach_weights = {round_num: 0.0 for round_num in range(1, 8)}
 
         for source, ratings in normalized_sources.items():
             entry = ratings.get(team)
@@ -65,14 +67,27 @@ def build_consensus_ratings(
                 defense_total += weight * adj_defense
                 defense_weight += weight
 
+            for round_num, prob in _coerce_reach_probs(entry.get("reach_probs")).items():
+                reach_totals[round_num] += weight * _clamp_fraction(prob)
+                reach_weights[round_num] += weight
+
         if rating_weight <= 0:
             continue
 
-        consensus[team] = {
+        consensus_entry = {
             "rating": rating_total / rating_weight,
             "adj_offense": offense_total / offense_weight if offense_weight > 0 else 100.0,
             "adj_defense": defense_total / defense_weight if defense_weight > 0 else 100.0,
         }
+        reach_probs = {
+            round_num: reach_totals[round_num] / reach_weights[round_num]
+            for round_num in range(1, 8)
+            if reach_weights[round_num] > 0
+        }
+        if reach_probs:
+            consensus_entry["reach_probs"] = reach_probs
+
+        consensus[team] = consensus_entry
 
     return consensus
 
@@ -91,15 +106,28 @@ def _canonicalize_ratings(ratings: dict[str, dict]) -> dict[str, dict]:
         rating_values = [_clamp_prob(v) for v in (_safe_float(e.get("rating")) for e in entries) if v is not None]
         offense_values = [v for v in (_safe_float(e.get("adj_offense")) for e in entries) if v is not None]
         defense_values = [v for v in (_safe_float(e.get("adj_defense")) for e in entries) if v is not None]
+        reach_values = {round_num: [] for round_num in range(1, 8)}
+        for entry in entries:
+            for round_num, prob in _coerce_reach_probs(entry.get("reach_probs")).items():
+                reach_values[round_num].append(_clamp_fraction(prob))
 
         if not rating_values:
             continue
 
-        merged[canonical] = {
+        merged_entry = {
             "rating": sum(rating_values) / len(rating_values),
             "adj_offense": sum(offense_values) / len(offense_values) if offense_values else 100.0,
             "adj_defense": sum(defense_values) / len(defense_values) if defense_values else 100.0,
         }
+        reach_probs = {
+            round_num: sum(values) / len(values)
+            for round_num, values in reach_values.items()
+            if values
+        }
+        if reach_probs:
+            merged_entry["reach_probs"] = reach_probs
+
+        merged[canonical] = merged_entry
 
     return merged
 
@@ -125,3 +153,25 @@ def _safe_float(value) -> float | None:
 def _clamp_prob(value: float) -> float:
     """Clamp a probability-like rating to a safe range."""
     return max(0.001, min(0.999, float(value)))
+
+
+def _clamp_fraction(value: float) -> float:
+    """Clamp a reach probability to a safe 0-1 range without lifting zeroes."""
+    return max(0.0, min(1.0, float(value)))
+
+
+def _coerce_reach_probs(value) -> dict[int, float]:
+    """Normalize reach-probability keys to ints."""
+    if not isinstance(value, dict):
+        return {}
+
+    rounds: dict[int, float] = {}
+    for round_key, round_value in value.items():
+        try:
+            round_num = int(round_key)
+            prob = float(round_value)
+        except (TypeError, ValueError):
+            continue
+        rounds[round_num] = prob
+
+    return rounds

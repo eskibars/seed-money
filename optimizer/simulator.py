@@ -83,7 +83,7 @@ def simulate_once(bracket: Bracket, rng: np.random.Generator) -> dict[int, list[
                 # Shouldn't happen in a complete bracket
                 winner = team_a or team_b
             else:
-                p_a_wins = log5(team_a.rating, team_b.rating)
+                p_a_wins = _game_win_prob(team_a, team_b, round_num)
                 winner = team_a if rng.random() < p_a_wins else team_b
 
             slots[game_slot] = winner
@@ -111,7 +111,44 @@ def simulate_once_flat(bracket: Bracket, rng: np.random.Generator) -> list[Team 
             if team_a is None or team_b is None:
                 slots[game_slot] = team_a or team_b
             else:
-                p_a_wins = log5(team_a.rating, team_b.rating)
+                p_a_wins = _game_win_prob(team_a, team_b, round_num)
                 slots[game_slot] = team_a if rng.random() < p_a_wins else team_b
 
     return slots
+
+
+def _game_win_prob(team_a: Team, team_b: Team, round_num: int) -> float:
+    """Get a matchup win probability, preferring direct forecast odds when present."""
+    direct_prob = _forecast_game_win_prob(team_a, team_b, round_num)
+    if direct_prob is not None:
+        return direct_prob
+    return log5(team_a.rating, team_b.rating)
+
+
+def _forecast_game_win_prob(team_a: Team, team_b: Team, round_num: int) -> float | None:
+    """Infer a head-to-head win probability from source reach odds."""
+    cond_a = _conditional_round_win_prob(team_a, round_num)
+    cond_b = _conditional_round_win_prob(team_b, round_num)
+    if cond_a is None or cond_b is None:
+        return None
+
+    total = cond_a + cond_b
+    if total <= 0:
+        return None
+
+    return min(0.999, max(0.001, cond_a / total))
+
+
+def _conditional_round_win_prob(team: Team, round_num: int) -> float | None:
+    """Estimate P(team advances from this round) from direct source probabilities."""
+    rounds = getattr(team, "reach_probs", {}) or {}
+    try:
+        current = float(rounds.get(round_num, 1.0 if round_num == 1 else 0.0))
+        nxt = float(rounds.get(round_num + 1))
+    except (TypeError, ValueError):
+        return None
+
+    if current <= 0:
+        return None
+
+    return min(0.999, max(0.001, nxt / current))
