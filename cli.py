@@ -1,7 +1,7 @@
 """March Madness Bracket Optimizer - CLI entry point.
 
 Usage:
-    python cli.py fetch-ratings [--source consensus|torvik|kenpom|espn|paine|manual] [--year 2026] [--file path.csv]
+    python cli.py fetch-ratings [--source consensus|torvik|kenpom|espn|paine|draftkings|manual] [--year 2026] [--file path.csv]
     python cli.py load-bracket [--interactive | --file path.json]
     python cli.py fetch-picks [--source espn|yahoo] [--year 2026] [--challenge-id 277 | --manual path.csv]
     python cli.py simulate [--sims 10000]
@@ -250,11 +250,11 @@ Workflow:
     p_ratings = subparsers.add_parser("fetch-ratings", help="Fetch team power ratings")
     p_ratings.add_argument(
         "--source",
-        choices=["consensus", "torvik", "kenpom", "espn", "paine", "manual"],
+        choices=["consensus", "torvik", "kenpom", "espn", "paine", "draftkings", "manual"],
         default=config.DEFAULT_SIMULATION_SOURCE,
     )
     p_ratings.add_argument("--year", type=int, default=2026)
-    p_ratings.add_argument("--file", help="CSV file path (for --source manual or paine)")
+    p_ratings.add_argument("--file", help="CSV file path (for --source manual, paine, or draftkings)")
 
     # load-bracket
     p_bracket = subparsers.add_parser("load-bracket", help="Load the 64-team bracket")

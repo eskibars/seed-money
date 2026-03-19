@@ -46,6 +46,11 @@ RATING_SOURCES = {
         "web": True,
         "refresh_default": True,
     },
+    "draftkings": {
+        "label": "DraftKings Implied Odds",
+        "web": True,
+        "refresh_default": True,
+    },
     "manual": {
         "label": "Manual CSV",
         "web": False,
@@ -63,6 +68,7 @@ RATING_SOURCE_WEIGHTS = {
     "kenpom": 0.30,
     "espn": 0.15,
     "paine": 0.10,
+    "draftkings": 0.10,
 }
 
 # Scoring presets for common pool formats

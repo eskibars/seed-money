@@ -19,7 +19,7 @@ def fetch_ratings_from_source(source: str,
         errors = []
         for component in config.RATING_SOURCE_WEIGHTS:
             try:
-                ratings = fetch_ratings_from_source(component, year=year, save=save, file=file)
+                ratings = fetch_ratings_from_source(component, year=year, save=save, file=None)
             except Exception as exc:
                 errors.append(f"{component}={exc}")
                 continue
@@ -63,6 +63,12 @@ def fetch_ratings_from_source(source: str,
 
         df = fetch_neil_paine_ratings(year=year, save=save, file=file)
         return parse_neil_paine_ratings(df)
+
+    if source == "draftkings":
+        from ingestion.draftkings import fetch_draftkings_ratings, parse_draftkings_ratings
+
+        df = fetch_draftkings_ratings(year=year, save=save, file=file)
+        return parse_draftkings_ratings(df)
 
     if source == "manual":
         if not file:
